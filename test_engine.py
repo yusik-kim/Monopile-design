@@ -34,6 +34,54 @@ def check_15mw_sand_converges():
     print("  PASS\n")
 
 
+def check_5mw_sand_converges():
+    print("Case: 5 MW, 20 m water depth, sand (phi=36 deg)")
+    soil = SoilProfile(soil_type="sand", friction_angle_deg=36.0, submerged_unit_weight_kn_m3=10.0)
+    inputs = DesignInputs(turbine_mw=5.0, water_depth_m=20.0, soil=soil, hs_m=3.0, tp_s=7.0, current_m_s=0.3)
+    result = size_monopile(inputs)
+    g = result.geometry
+
+    print(f"  D={g.diameter_m:.2f} m  t={g.wall_thickness_m*1000:.1f} mm  "
+          f"L={g.embedded_length_m:.2f} m  L/D={g.embedded_length_m/g.diameter_m:.2f}")
+    print(f"  utilizations: ULS={result.uls_utilization:.3f} SLS={result.sls_utilization:.3f} "
+          f"NFA={result.nfa_utilization:.3f} FLS={result.fls_utilization:.3f}")
+    print(f"  governing: {result.governing_constraint}")
+
+    assert not any("did not converge" in n for n in result.notes), "expected this case to converge"
+    assert result.uls_utilization <= 1.0
+    assert result.sls_utilization <= 1.0
+    assert result.nfa_utilization <= 1.0
+    assert result.fls_utilization <= 1.0
+    # Sanity range vs. the real OC3/NREL 5 MW reference monopile (D=6m).
+    assert 4.0 <= g.diameter_m <= 8.0, "diameter outside plausible OC3 5MW reference range"
+    assert 20.0 <= g.embedded_length_m <= 40.0, "embedded length outside plausible range"
+    print("  PASS\n")
+
+
+def check_22mw_sand_converges():
+    print("Case: 22 MW, 34 m water depth, sand (phi=36 deg)")
+    soil = SoilProfile(soil_type="sand", friction_angle_deg=36.0, submerged_unit_weight_kn_m3=10.0)
+    inputs = DesignInputs(turbine_mw=22.0, water_depth_m=34.0, soil=soil, hs_m=6.0, tp_s=10.5, current_m_s=0.5)
+    result = size_monopile(inputs)
+    g = result.geometry
+
+    print(f"  D={g.diameter_m:.2f} m  t={g.wall_thickness_m*1000:.1f} mm  "
+          f"L={g.embedded_length_m:.2f} m  L/D={g.embedded_length_m/g.diameter_m:.2f}")
+    print(f"  utilizations: ULS={result.uls_utilization:.3f} SLS={result.sls_utilization:.3f} "
+          f"NFA={result.nfa_utilization:.3f} FLS={result.fls_utilization:.3f}")
+    print(f"  governing: {result.governing_constraint}")
+
+    assert not any("did not converge" in n for n in result.notes), "expected this case to converge"
+    assert result.uls_utilization <= 1.0
+    assert result.sls_utilization <= 1.0
+    assert result.nfa_utilization <= 1.0
+    assert result.fls_utilization <= 1.0
+    # Sanity range vs. the real IEA 22MW reference monopile (D=10m, optimizer-capped).
+    assert 8.0 <= g.diameter_m <= 14.0, "diameter outside plausible IEA 22MW reference range"
+    assert 40.0 <= g.embedded_length_m <= 70.0, "embedded length outside plausible range"
+    print("  PASS\n")
+
+
 def check_8mw_clay_converges_since_nfa_fix():
     """
     Before the 2026-07-16 NFA fix (see METHODOLOGY_REPORT.md Section 10),
@@ -114,7 +162,9 @@ def check_nfa_matches_real_geometries():
 
 if __name__ == "__main__":
     check_turbine_library_matches_sources()
+    check_5mw_sand_converges()
     check_15mw_sand_converges()
+    check_22mw_sand_converges()
     check_8mw_clay_converges_since_nfa_fix()
     check_nfa_matches_real_geometries()
     print("All checks passed.")

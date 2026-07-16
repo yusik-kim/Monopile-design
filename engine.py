@@ -51,7 +51,7 @@ FATIGUE_DESIGN_FACTOR = 2.0       # DNV DFF for typical (non-critical/inspectabl
 # 15MW reference monopile wall thickness (~40-55mm at D=10m) -- see
 # docs/methodology.md (2026-07-16). NOT derived from a real DLC/rainflow
 # spectrum; recalibrate once the model has real turbine fatigue load data.
-FATIGUE_LOAD_FACTOR = 0.17
+FATIGUE_LOAD_FACTOR = 0.176
 
 # Reference turbines: mass_t is total turbine mass (RNA + tower); thrust_mn is
 # the extreme/ultimate design rotor thrust used directly as the ULS
@@ -607,6 +607,35 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
 
         geometry = _clamped(geometry)
         result = evaluate_monopile(inputs, geometry)
+
+    if converged:
+        # The growth loop above only ever adds material and stops at the
+        # first passing geometry -- if the initial guess (t0 = D/110)
+        # already satisfies every check, it never runs at all, leaving
+        # wall thickness at that guess regardless of how much margin FLS/ULS
+        # actually have. Shrink thickness step-wise while every check stays
+        # <= 1.0, so the result reflects the true minimum-material thickness
+        # rather than just "the first geometry checked that happened to
+        # pass." Diameter is deliberately not shrunk here -- it also feeds
+        # NFA and the extreme-load calculation, and NFA is still pending
+        # its own verification (see docs/methodology.md).
+        while True:
+            t_floor_m = geometry.diameter_m / inputs.dt_ratio_max
+            t_thinner_m = max(geometry.wall_thickness_m - t_step_m, t_floor_m)
+            if t_thinner_m >= geometry.wall_thickness_m:
+                break
+            thinner_geometry = MonopileGeometry(geometry.diameter_m, t_thinner_m, geometry.embedded_length_m)
+            thinner_result = evaluate_monopile(inputs, thinner_geometry)
+            thinner_checks = (
+                thinner_result.uls_utilization,
+                thinner_result.sls_utilization,
+                thinner_result.nfa_utilization,
+                thinner_result.fls_utilization,
+            )
+            if all(u <= 1.0 for u in thinner_checks):
+                geometry, result = thinner_geometry, thinner_result
+            else:
+                break
 
     if not converged:
         result.notes.append(
