@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Parallel development effort with a different tool -- not part of this repo.
+/Codex/
