@@ -12,11 +12,13 @@
 - 2026-07-16 — Replaced 6 hand-estimated TURBINE_LIBRARY entries (8-20MW) with 5 entries sourced from real reference-turbine reports (5/10/15/22 MW verified + 25MW extrapolated) — see METHODOLOGY_REPORT.md §2 for sources (OC3/NREL 5MW, DTU 10MW, IEA 15MW, IEA 22MW).
 - 2026-07-16 — dt_ratio_max widened 140→160 — matches the real D/t optimization bound used in the IEA 22MW reference monopile design.
 - 2026-07-16 — RNA/tower mass split (natural-frequency check only) changed 40/60→50/50 — real observed range across 4 sourced turbines is 43.6%-54.2% RNA fraction; 50/50 is the average, not a fixed ratio.
+- 2026-07-16 — NFA cantilever changed from one uniform "average tower" section over the whole mudline-to-hub span to a two-segment model (real pile EI below the transition piece, average-tower EI above it) — the uniform version lumped the much-stiffer pile-above-mudline length in with the flexible tower EI, systematically underpredicting f0 (found via the 5MW/OC3 real-geometry check). Added `transition_piece_height_m` to TURBINE_LIBRARY (sourced: OC3=10m, IEA15/22MW=15m each; DTU10MW assumed=15m, not stated in its turbine-only report).
+- 2026-07-16 — Soft-stiff band formula: added a fallback for when `3×rpm_min < 1.1×rpm_max` (band would invert) — falls back to a lower-bound-only criterion using `3×rpm_max` as a loose ceiling, matching how the IEA 22MW report itself frames its frequency target (single-sided 0.15Hz minimum, no explicit 3P-avoidance). Fixes the 22MW band inversion; result now matches the report's stated ~0.16Hz achieved frequency to 3 s.f.
 
 ## Open questions
 - FATIGUE_LOAD_FACTOR=0.17 is still ad-hoc (back-solved to one reference point, not a DLC spectrum) — recalibrate later.
 - Sand nh-vs-friction-angle table and clay k=0.25×su correlation are rough approximations, not validated against site-specific geotechnical data.
-- **NFA check not validated outside 15/20 MW (found 2026-07-16, not fixed):** evaluating the model at the *real* 5MW/OC3 and 22MW/IEA monopile geometries reveals two distinct problems — (1) at 5MW the model underpredicts natural frequency below its own target band (not just a calibration-point artifact); (2) at 22MW the soft-stiff target band formula itself inverts (band_low > band_high) because very wide rotor-speed ranges (rpm_min << rpm_max, real for large turbines) push 3×rpm_min below 1.1×rpm_max. See METHODOLOGY_REPORT.md §10 for detail. Needs a fix before trusting NFA results outside 15-20MW.
+- NFA is now validated against 4 real turbine sizes (5/15/20/22MW, see METHODOLOGY_REPORT.md §10) but still omits the K_LM cross-coupling term and uses a single-point-calibrated tower regression for the tower segment above the transition piece.
 
 ## Standards / references in use
 - DNV-ST-0126 — support structures for wind turbines

@@ -102,15 +102,21 @@ appears. Units follow the MN-based convention from §0.
 |---|---|---|
 | `d_avg_tower`, `t_avg_tower` | approximated average tower diameter/thickness | m |
 | `I_tower`, `EI_tower` | tower second moment of area / flexural rigidity | m⁴, MN·m² |
-| `h` | cantilever height used in the frequency model, `hub_height_m + water_depth_m` | m |
-| `flexibility` | total tip flexibility (tower bending + foundation `K_L` + `K_R`) | m/MN |
+| `EI_pile` | pile flexural rigidity (same as `EI` elsewhere), used for the pile-above-mudline cantilever segment | MN·m² |
+| `transition_piece_height_m` | height of the tower base (monopile/tower interface) above MSL; a turbine-library field | m |
+| `pile_above_mudline` | height of the (stiff) pile segment from mudline to the transition piece, `water_depth_m + transition_piece_height_m` | m |
+| `h` | total cantilever height, mudline to hub, `hub_height_m + water_depth_m` (unchanged) | m |
+| `tower_height` | height of the (more flexible) tower segment above the transition piece, `h - pile_above_mudline` | m |
+| `cantilever_flexibility` | two-segment tip flexibility of the pile-above-mudline + tower cantilever (see §7) | m/MN |
+| `flexibility` | total tip flexibility (`cantilever_flexibility` + foundation `K_L` + `K_R`) | m/MN |
 | `k_eq` | equivalent lateral stiffness at hub height, `1 / flexibility` | MN/m |
 | `m_RNA`, `m_tower` | assumed RNA/tower mass split of `total_turbine_mass_t` | t |
 | `m_eff` | effective modal mass, `m_RNA + 0.25 × m_tower` (Rayleigh factor) | kg |
 | `f0` | first (fore-aft) natural frequency | Hz |
 | `f_1P_max`, `f_1P_min` | rotor (1P) excitation frequency range bounds, from `rpm_max`/`rpm_min` | Hz |
 | `f_3P_min` | bottom of the blade-passing (3P) frequency range, `3 × f_1P_min` | Hz |
-| `band_low`, `band_high` | soft-stiff target frequency band bounds (with 10% margins) | Hz |
+| `f_3P_max` | top of the 3P range (3P at rated), `3 × f_1P_max` — used as the degenerate-gap fallback ceiling | Hz |
+| `band_low`, `band_high` | soft-stiff target frequency band bounds (with 10% margins); `band_high` falls back to `0.9×f_3P_max` when the classical gap is degenerate | Hz |
 | `utilization_NFA` | NFA utilization ratio (pass if `f0` inside `[band_low, band_high]`) | – |
 
 **FLS (§8)**
@@ -345,41 +351,64 @@ t_avg_tower = d_avg_tower / 170
 **Assumption/calibration:** this regression is calibrated to match the
 published IEA 15 MW reference tower (base 10.0 m / top 6.5 m → average
 8.25 m at 150 m hub height) as the **only** anchor point; it is not
-independently validated for other turbine sizes. This value has an outsized
-effect on the result — see §10 (verification) where an earlier,
-under-calibrated version of this formula caused the sizing loop to diverge.
+independently validated for other turbine sizes.
 
-**Simplified 2-spring flexibility superposition:**
-Models the tower+RNA as a cantilever of height `h` (hub height above
-mudline) with a tip mass, on a foundation with only lateral (`K_L`) and
-rocking (`K_R`) springs — **omitting the `K_LM` cross-coupling term** that
-Arany's full 3-spring model includes (a documented simplification):
+**Two-segment cantilever flexibility (fixed 2026-07-16):** the cantilever
+from mudline to hub is **not** a single uniform "average tower" section —
+it is split at the transition piece into (1) the pile-above-mudline segment,
+which uses the **actual pile's own EI** (much stiffer than the tower, since
+it's the same large-diameter section as below mudline), and (2) the tower
+segment above the transition piece, using the average-tower EI above. The
+original single-segment version (`h^3/(3*EI_tower)` over the *whole*
+mudline-to-hub span) was found to systematically underpredict `f0` — see §10.
 ```
+pile_above_mudline = water_depth_m + transition_piece_height_m   (transition_piece_height_m
+                                                                    is a turbine-library field,
+                                                                    see SS2)
+h = hub_height_m + water_depth_m                        (unchanged: total mudline-to-hub height)
+tower_height = h - pile_above_mudline
+
 I_tower = (pi/64) * (d_avg_tower^4 - (d_avg_tower - 2*t_avg_tower)^4)
 EI_tower = STEEL_E_MPA * I_tower
+EI_pile  = STEEL_E_MPA * I                              (I = pile second moment of area, SS0/SS5)
 
-h = hub_height_m + water_depth_m
+# Two-segment cantilever tip flexibility (virtual work, stiff pile segment
+# 0..pile_above_mudline, more flexible tower segment pile_above_mudline..h):
+cantilever_flexibility = (h^3 - tower_height^3) / (3*EI_pile) + tower_height^3 / (3*EI_tower)
 
-flexibility = h^3/(3*EI_tower) + 1/K_L + h^2/K_R
+flexibility = cantilever_flexibility + 1/K_L + h^2/K_R
 k_eq = 1 / flexibility                          [MN/m]
 
-m_RNA   = 0.4 * total_turbine_mass_t            (assumption: 40/60 RNA/tower split)
-m_tower = 0.6 * total_turbine_mass_t
+m_RNA   = 0.5 * total_turbine_mass_t            (assumption: 50/50 RNA/tower split, see SS2)
+m_tower = 0.5 * total_turbine_mass_t
 m_eff   = (m_RNA + 0.25*m_tower) * 1000          [kg]   (0.25 = standard Rayleigh
                                                           cantilever-with-tip-mass
                                                           effective-mass factor)
 
 f0 = (1/(2*pi)) * sqrt(k_eq_in_N_per_m / m_eff)   [Hz]
 ```
+Still omits the `K_LM` cross-coupling term that Arany's full 3-spring model
+includes (a documented simplification, unchanged).
 
-**Soft-stiff target band:**
+**Soft-stiff target band, with a degenerate-gap fallback (fixed 2026-07-16):**
 ```
 f_1P_max = rpm_max / 60
 f_1P_min = rpm_min / 60
 f_3P_min = 3 * f_1P_min
+f_3P_max = 3 * f_1P_max
 
 band_low  = 1.1 * f_1P_max      (10% margin above top of 1P range)
 band_high = 0.9 * f_3P_min      (10% margin below bottom of 3P range)
+
+if band_high <= band_low:
+    # Classical soft-stiff gap doesn't exist (wide rotor-speed range: real
+    # trend for very large turbines, e.g. IEA 22MW rpm_min/rpm_max = 0.256).
+    # Fall back to a lower-bound-only criterion, matching how the IEA 22MW
+    # reference design itself is framed (single-sided 0.15 Hz minimum-
+    # frequency target, checked only against 1P at rated): use 3P-at-rated
+    # as a loose upper ceiling instead of 3P-at-cut-in.
+    band_high = 0.9 * f_3P_max
+    # -> a note is added to the result explaining the fallback was used.
 
 utilization_NFA:
   if f0 < band_low:   band_low / f0
@@ -387,6 +416,16 @@ utilization_NFA:
   else: max(band_low/f0, f0/band_high)     (both < 1, i.e. "pass with margin")
 ```
 Pass if `utilization_NFA ≤ 1.0`, i.e. `f0` sits inside `[band_low, band_high]`.
+
+**Why the fallback is principled, not arbitrary:** the classical two-sided
+"avoid both 1P and 3P across the whole operating rpm range" criterion
+requires `3*rpm_min > rpm_max` (with margin) to have any valid solution at
+all. This holds for smaller turbines (5–15 MW, `rpm_max/rpm_min` ≈ 1.5–1.8)
+but breaks down once that ratio exceeds ~3 (22 MW: ratio 3.9). At that point
+the 3P energy at cut-in-region rpm is already *below* the 1P-at-rated
+target, so it stops being a meaningful constraint — which is exactly why the
+IEA 22 MW report doesn't mention 3P avoidance at all, only a single 0.15 Hz
+minimum tied to 1P at rated (§2).
 
 ---
 
@@ -520,62 +559,57 @@ input outside pile geometry, e.g. tower stiffness), OR 500 iterations.
 
 ## 10. Verification performed
 
-Three cases were run against `size_monopile` as a sanity check (not a unit
-test suite). Numbers below are with `FATIGUE_LOAD_FACTOR = 0.17` (updated
-2026-07-16 — see §8 and `docs/methodology.md`); `test_engine.py` at the repo
-root reproduces the 15 MW case as a runnable check.
+Cases were run against `size_monopile` and `evaluate_monopile` as sanity
+checks (not a unit test suite). Numbers below reflect the current model:
+`FATIGUE_LOAD_FACTOR = 0.17` (§8) and the two-segment cantilever + degenerate
+-gap NFA fallback (§7), both updated 2026-07-16 — see `docs/methodology.md`.
+`test_engine.py` at the repo root reproduces all of these as runnable checks.
 
 | Case | Result | Governing check | Notes |
 |---|---|---|---|
-| 15 MW, 35 m depth, sand (φ=35°) | D=9.33 m, t=84.8 mm, L=46.67 m (L/D≈5.0) | **NFA** (margin 0.036) | Diameter and embedded length match the published IEA 15 MW reference-monopile range; wall thickness (~85 mm) is thicker than the reference's ~40-55 mm but no longer pinned at the `dt_ratio_min` floor the way it was under the old fatigue factor — see §8 worked example |
-| 20 MW, 45 m depth, sand (φ=38°) | D=11.0 m, t=100.0 mm, L=55 m (L/D=5.0) | **NFA** (margin 0.097) | Scales sensibly with turbine size |
-| 8 MW, 25 m depth, clay (su=80 kPa) | Does **not** converge (runaway guard at D=21.1 m) | NFA | Also flags `beta*L < 2.5` — the closed-form soil assumption itself breaks down for this combination; correctly reported rather than silently returning a bad answer |
+| 15 MW, 35 m depth, sand (φ=35°) | D=9.33 m, t=84.8 mm, L=46.67 m (L/D≈5.0) | **NFA** (margin 0.182) | Diameter and embedded length match the published IEA 15 MW reference-monopile range |
+| 20 MW, 45 m depth, sand (φ=38°) | D=11.0 m, t=100.0 mm, L=55 m (L/D=5.0) | **NFA** | Scales sensibly with turbine size |
+| 5 MW, 20 m depth, sand (φ=36°) | D=6.00 m, t=54.5 mm, L=30.0 m (L/D=5.0) | **NFA** | Diameter matches the real OC3 monopile (6 m) almost exactly; wall thickness/embedment same order as the real 60 mm / 36 m |
+| 22 MW, 34 m depth, sand (φ=36°) | D=11.67 m, t=106.1 mm, L=58.3 m (L/D=5.0) | **NFA** | Real IEA 22MW design caps diameter at 10 m (an explicit optimizer bound not replicated here); still same order |
+| 8 MW, 25 m depth, clay (su=80 kPa) | D=8.20 m, t=63.6 mm, L=35.0 m (L/D≈4.3) | **NFA** (margin 0.009) | Also flags `beta*L < 2.5` — the closed-form soil assumption is genuinely at the edge of its valid range for this combination; correctly flagged rather than silently ignored |
 
-Note that FLS no longer governs the 15/20 MW cases now that
-`FATIGUE_LOAD_FACTOR` is calibrated down to 0.17 (FLS utilization dropped
-from ~0.97 to ~0.32-0.33) — **NFA** is the tightest check instead. This is a
-direct, expected consequence of the recalibration in §8, not a new issue.
+Two bugs were found and fixed during verification, both while testing the
+newly-sourced 5 MW/OC3 and 22 MW/IEA turbines (§2) against their *real*
+reference monopile geometries — neither was visible when the model had only
+ever been checked against 15/20 MW:
 
-**Bug found and fixed during verification:** the original `_tower_geometry`
-regression (`4.0 + 0.01×hub_height`) under-estimated tower stiffness so
-severely that tower flexibility dominated >95% of total system flexibility
-at all realistic pile sizes — the iteration loop grew the pile diameter to
-84 m chasing a frequency target that pile geometry could not move. Fixed by
-recalibrating against the published IEA 15 MW tower geometry (§7) and adding
-the runaway guard described in §9 so any future similar mismatch fails
-loudly instead of silently.
+1. **Tower-geometry miscalibration** (found earlier, already noted above):
+   the original `_tower_geometry` regression (`4.0 + 0.01×hub_height`)
+   under-estimated tower stiffness so severely that tower flexibility
+   dominated >95% of total system flexibility — the iteration loop grew the
+   pile diameter to 84 m chasing an unreachable frequency target. Fixed by
+   recalibrating against the published IEA 15 MW tower geometry.
+2. **Two-segment cantilever + degenerate-gap fallback** (found and fixed
+   2026-07-16): evaluating `evaluate_monopile` at the *real* 5 MW/OC3
+   geometry (D=6 m, t=60 mm, L=36 m) gave `f0 = 0.191 Hz`, below its own
+   target band `[0.222, 0.31] Hz`; at the *real* 22 MW/IEA geometry (D=10 m,
+   t=100 mm, L=45 m) the target band itself came out **inverted**
+   (`band_low = 0.1295 > band_high = 0.0813`). Root cause for both: the
+   single-segment cantilever formula lumped the much stiffer pile-above
+   -mudline length in with the tower's (much more flexible) average EI over
+   the *whole* mudline-to-hub span, underpredicting stiffness/frequency; and
+   the classical 1P/3P gap formula doesn't handle turbines whose rotor
+   -speed range is wide enough that `3×rpm_min < 1.1×rpm_max` (real for very
+   large turbines — the IEA 22 MW report itself only targets a single-sided
+   minimum frequency, not a two-sided gap, for exactly this reason). Fixed
+   by splitting the cantilever into a pile-above-mudline segment (real pile
+   EI) plus a tower segment (average-tower EI) per §7, and adding a fallback
+   band definition when the classical gap is degenerate. **Result:** the 22
+   MW case now predicts `f0 = 0.1600 Hz`, matching the report's own stated
+   achieved value (~0.16 Hz) to 3 significant figures; the 5 MW case now
+   falls inside its band; and the previously-non-converging 8 MW/clay case
+   now converges too, as a side effect of the same fix.
 
-**Two new NFA generalization issues found 2026-07-16, NOT yet fixed**,
-discovered by evaluating `evaluate_monopile` directly at the *real* reference
-geometries for the newly-sourced 5 MW and 22 MW turbines (§2):
-
-1. **5 MW/OC3** (real geometry D=6 m, t=60 mm, L=36 m, 20 m water depth):
-   the model computes `f0 = 0.191 Hz`, below its own target band
-   `[0.222, 0.31] Hz`. This is a different failure from the 15 MW tower
-   -calibration bug above (already fixed) — it suggests the simplified
-   2-spring frequency model (§7) may be biased low in general, not only at
-   the one point (15 MW) it was calibrated against. Not independently
-   confirmed against the OC3 report's own eigenanalysis figure (Figure 20),
-   which is image-only in the source PDF and wasn't extractable as text
-   this session.
-2. **22 MW/IEA** (real geometry D=10 m, t=100 mm, L=45 m, 34 m water depth):
-   the target band itself comes out **inverted** —
-   `band_low = 0.1295 Hz > band_high = 0.0813 Hz`. Cause: at very wide rotor
-   -speed ranges (`rpm_min=1.807` vs `rpm_max=7.061`, a real trend for very
-   large turbines — see §2), `3 × f_1P_min` falls below `1.1 × f_1P_max`, so
-   no valid gap exists between the 1P and 3P bands under the `band_low`/
-   `band_high` formula in §7. This is a **logic gap**, not a calibration
-   issue — it mirrors a real industry challenge (the soft-stiff gap shrinks
-   or vanishes for very large turbines with wide operating rpm ranges), but
-   the code doesn't currently detect or handle the degenerate case; it just
-   produces a confusing `nfa_utilization` and the iteration loop chases an
-   impossible target, hitting the non-convergence guard (§9).
-
-Both cases were caught precisely because `size_monopile` failed to converge
-and flagged it rather than silently returning a plausible-looking wrong
-answer — see the non-convergence note added in §9. Neither has been fixed
-yet; treat the NFA check as **not validated outside the 15/20 MW range**
-until this is addressed.
+Both bugs were caught because `size_monopile` failed to converge and
+flagged it rather than silently returning a plausible-looking wrong answer
+— see the non-convergence note in §9. The NFA check is now validated against
+four real turbine sizes (5/15/20/22 MW); the 25 MW extrapolated entry (§2)
+remains unverified since it isn't a real reference turbine.
 
 ---
 
@@ -595,10 +629,10 @@ early screening:
 7. Sand equivalent depth `z_ref = L/3` for a linearly-varying subgrade modulus.
 8. Clay `k_soil = 0.25 × su` correlation (no ε50/strain-level adjustment).
 9. SLS governed by rotation only (no deflection limit checked).
-10. Tower average diameter/thickness regressed from hub height alone, calibrated to one data point (IEA 15 MW) — and, per §10, still under- or over-predicts frequency at other verified turbine sizes (5 MW, 22 MW).
+10. Tower average diameter/thickness regressed from hub height alone, calibrated to one data point (IEA 15 MW) — now used only for the tower segment above the transition piece (§7), which reduced its impact on the overall result, but the regression itself is still single-point-calibrated.
 11. RNA/tower mass split assumed 50/50 of total turbine mass (updated 2026-07-16 from a 40/60 guess) — real observed range is 43.6%–54.2% across the four sourced turbines.
 12. Rayleigh effective-mass factor of 0.25 for the tower's tip-mass contribution.
-13. Natural-frequency model omits the `K_LM` foundation cross-coupling term, and (per §10, found 2026-07-16) its soft-stiff band formula can become inverted/degenerate for turbines with very wide rotor-speed ranges (e.g. 22 MW) — **not validated outside 15/20 MW**.
+13. Natural-frequency model omits the `K_LM` foundation cross-coupling term. The band-inversion bug for wide-rotor-speed-range turbines (e.g. 22 MW) was found and fixed 2026-07-16 with a documented fallback (§7) — validated against 5/15/20/22 MW; the 25 MW extrapolated entry is unverified.
 14. Fatigue `FATIGUE_LOAD_FACTOR = 0.17` (ratio of fatigue-driving stress range to extreme characteristic stress) — updated 2026-07-16, back-calculated to match the IEA 15 MW reference wall thickness; still an ad-hoc placeholder pending recalibration against real turbine fatigue load data, and the single most influential unvalidated FLS number.
 15. Fatigue cycle count uses one cycle per rotor revolution at the min/max rpm average, not a wind-speed distribution.
 16. Single DNV-RP-C203-style S-N curve (`log10(a)=12.16`, `m=3`) applied structure-wide, not joint-specific.
@@ -606,5 +640,4 @@ early screening:
 
 Items 6–13 (soil and natural-frequency modeling) are the ones most likely to
 materially shift results if refined with real project data — see §4/§7 and
-the bugs described in §10. Item 13 in particular is now a **known-broken**
-area outside the 15/20 MW range, not just an approximation.
+the bugs described in §10.

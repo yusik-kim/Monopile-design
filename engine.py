@@ -79,16 +79,21 @@ FATIGUE_LOAD_FACTOR = 0.17
 #   22 MW -- IEA 22-MW reference turbine: DTU Wind E-0243 report. RNA
 #            1215.6 t (stated total), Tower 1574 t. Thrust 2.793 MN and
 #            rpm_min/rpm_max taken directly from the report's Table 1/2.
+#   transition_piece_height_m: height of the tower base (monopile/tower
+#   interface) above MSL. Sourced for 5/15/22 MW (OC3: 10m; IEA 15/22MW: 15m
+#   each, stated directly in their reports); 10MW is assumed (not stated in
+#   the DTU 10MW turbine-only report, which doesn't cover the support
+#   structure) equal to the more common 15m value; 25MW extrapolated/assumed.
 TURBINE_LIBRARY = [
-    {"mw": 5.0,  "rotor_diameter_m": 126.0, "hub_height_m": 90.0,  "mass_t": 697.5,  "thrust_mn": 0.80,  "rpm_min": 6.90,  "rpm_max": 12.10},
-    {"mw": 10.0, "rotor_diameter_m": 178.3, "hub_height_m": 119.0, "mass_t": 1280.0, "thrust_mn": 1.50,  "rpm_min": 6.00,  "rpm_max": 9.60},
-    {"mw": 15.0, "rotor_diameter_m": 240.0, "hub_height_m": 150.0, "mass_t": 1877.0, "thrust_mn": 2.50,  "rpm_min": 5.00,  "rpm_max": 7.56},
-    {"mw": 22.0, "rotor_diameter_m": 284.0, "hub_height_m": 170.0, "mass_t": 2789.6, "thrust_mn": 2.793, "rpm_min": 1.807, "rpm_max": 7.061},
+    {"mw": 5.0,  "rotor_diameter_m": 126.0, "hub_height_m": 90.0,  "mass_t": 697.5,  "thrust_mn": 0.80,  "rpm_min": 6.90,  "rpm_max": 12.10, "transition_piece_height_m": 10.0},
+    {"mw": 10.0, "rotor_diameter_m": 178.3, "hub_height_m": 119.0, "mass_t": 1280.0, "thrust_mn": 1.50,  "rpm_min": 6.00,  "rpm_max": 9.60,  "transition_piece_height_m": 15.0},
+    {"mw": 15.0, "rotor_diameter_m": 240.0, "hub_height_m": 150.0, "mass_t": 1877.0, "thrust_mn": 2.50,  "rpm_min": 5.00,  "rpm_max": 7.56,  "transition_piece_height_m": 15.0},
+    {"mw": 22.0, "rotor_diameter_m": 284.0, "hub_height_m": 170.0, "mass_t": 2789.6, "thrust_mn": 2.793, "rpm_min": 1.807, "rpm_max": 7.061, "transition_piece_height_m": 15.0},
     # Extrapolated (NOT a verified reference turbine) -- linear continuation
     # of the 15->22 MW trend for each column. rpm_min in particular drops
     # very steeply between 15 and 22 MW in the real data (5.00 -> 1.807);
     # extrapolating that trend further is the least-certain figure here.
-    {"mw": 25.0, "rotor_diameter_m": 303.0, "hub_height_m": 179.0, "mass_t": 3181.0, "thrust_mn": 2.92,  "rpm_min": 0.44,  "rpm_max": 6.85},
+    {"mw": 25.0, "rotor_diameter_m": 303.0, "hub_height_m": 179.0, "mass_t": 3181.0, "thrust_mn": 2.92,  "rpm_min": 0.44,  "rpm_max": 6.85,  "transition_piece_height_m": 15.0},
 ]
 
 # API-style nh (constant of horizontal subgrade reaction gradient, MN/m^4)
@@ -341,21 +346,38 @@ def _tower_geometry(inputs: DesignInputs, turbine: dict) -> tuple[float, float]:
 
 
 def _natural_frequency(inputs: DesignInputs, geometry: MonopileGeometry, turbine: dict,
-                        k_lateral_mn_per_m: float, k_rocking_mnm_per_rad: float) -> tuple[float, tuple[float, float], float]:
+                        k_lateral_mn_per_m: float, k_rocking_mnm_per_rad: float) -> tuple[float, tuple[float, float], float, list[str]]:
     """Simplified 2-spring (K_L, K_R) flexibility-superposition first-mode
-    natural frequency: cantilever of height h = hub height above mudline,
-    tip mass = RNA + tower participation, on a flexible (translating +
-    rotating) foundation. Omits the K_LM cross-coupling term that Arany's
-    full 3-spring model includes -- a documented concept-stage simplification.
+    natural frequency: a two-segment cantilever (stiff pile-above-mudline
+    segment + more flexible tower segment above the transition piece), tip
+    mass = RNA + tower participation, on a flexible (translating + rotating)
+    foundation. Omits the K_LM cross-coupling term that Arany's full
+    3-spring model includes -- a documented concept-stage simplification.
+
+    The cantilever is split at the transition piece rather than treated as
+    one uniform "average tower" section over the whole mudline-to-hub span:
+    lumping the much stiffer pile-above-mudline length in with the tower's
+    average EI was found (2026-07-16) to systematically underpredict f0 --
+    see docs/methodology.md.
     """
     d_avg, t_avg = _tower_geometry(inputs, turbine)
     d_inner = d_avg - 2 * t_avg
     i_tower = (math.pi / 64) * (d_avg ** 4 - d_inner ** 4)
     ei_tower_mnm2 = STEEL_E_MPA * i_tower
 
-    h_m = turbine["hub_height_m"] + inputs.water_depth_m
+    _, _, ei_pile_mnm2 = _pile_section_properties(geometry)
 
-    flexibility_m_per_mn = (h_m ** 3) / (3 * ei_tower_mnm2) + 1.0 / k_lateral_mn_per_m \
+    h_m = turbine["hub_height_m"] + inputs.water_depth_m
+    pile_above_mudline_m = inputs.water_depth_m + turbine["transition_piece_height_m"]
+    tower_height_m = h_m - pile_above_mudline_m
+
+    # Two-segment cantilever tip flexibility (virtual work), stiff pile
+    # segment (0 to pile_above_mudline_m) + tower segment (to h_m):
+    #   flexibility = (h^3 - tower_height^3)/(3*EI_pile) + tower_height^3/(3*EI_tower)
+    cantilever_flexibility_m_per_mn = (h_m ** 3 - tower_height_m ** 3) / (3 * ei_pile_mnm2) \
+        + (tower_height_m ** 3) / (3 * ei_tower_mnm2)
+
+    flexibility_m_per_mn = cantilever_flexibility_m_per_mn + 1.0 / k_lateral_mn_per_m \
         + (h_m ** 2) / k_rocking_mnm_per_rad
     k_eq_mn_per_m = 1.0 / flexibility_m_per_mn
     k_eq_n_per_m = k_eq_mn_per_m * 1e6
@@ -373,9 +395,27 @@ def _natural_frequency(inputs: DesignInputs, geometry: MonopileGeometry, turbine
     f_1p_max_hz = turbine["rpm_max"] / 60.0
     f_1p_min_hz = turbine["rpm_min"] / 60.0
     f_3p_min_hz = 3 * f_1p_min_hz
+    f_3p_max_hz = 3 * f_1p_max_hz
 
+    notes: list[str] = []
     band_low_hz = f_1p_max_hz * 1.1
     band_high_hz = f_3p_min_hz * 0.9
+    if band_high_hz <= band_low_hz:
+        # Classical soft-stiff gap (between the top of the 1P band and the
+        # bottom of the 3P band) doesn't exist when the rotor-speed range is
+        # wide enough that 3*rpm_min < 1.1*rpm_max -- a real trend for very
+        # large turbines (see docs/methodology.md, 2026-07-16). Fall back to
+        # a lower-bound-only criterion (clear 1P at rated), matching e.g. the
+        # IEA 22MW reference design's single-sided 0.15 Hz minimum-frequency
+        # target; use 3P-at-rated as a loose upper ceiling instead of 3P-at
+        # -cut-in, since that no longer meaningfully constrains the design.
+        band_high_hz = f_3p_max_hz * 0.9
+        notes.append(
+            "soft-stiff 1P/3P gap does not exist for this turbine's rotor "
+            "-speed range (3*rpm_min < 1.1*rpm_max); falling back to a "
+            "lower-bound-only frequency criterion (clear 1P at rated), "
+            "matching real large-turbine practice (e.g. IEA 22MW)."
+        )
 
     if f0_hz < band_low_hz:
         nfa_utilization = band_low_hz / f0_hz
@@ -384,7 +424,7 @@ def _natural_frequency(inputs: DesignInputs, geometry: MonopileGeometry, turbine
     else:
         nfa_utilization = max(band_low_hz / f0_hz, f0_hz / band_high_hz)
 
-    return f0_hz, (band_low_hz, band_high_hz), nfa_utilization
+    return f0_hz, (band_low_hz, band_high_hz), nfa_utilization, notes
 
 
 def _fls_check(inputs: DesignInputs, geometry: MonopileGeometry, turbine: dict,
@@ -440,7 +480,7 @@ def evaluate_monopile(inputs: DesignInputs, geometry: MonopileGeometry) -> Monop
 
     uls_utilization = _uls_check(geometry, m_mudline_mnm, v_mudline_mn)
     sls_rotation_deg, sls_utilization = _sls_check(inputs, m_mudline_mnm, v_mudline_mn, k_line_mn_m2, beta)
-    f0_hz, band, nfa_utilization = _natural_frequency(inputs, geometry, turbine, k_lateral, k_rocking)
+    f0_hz, band, nfa_utilization, nfa_notes = _natural_frequency(inputs, geometry, turbine, k_lateral, k_rocking)
     fls_damage, fls_utilization = _fls_check(inputs, geometry, turbine, m_mudline_mnm)
 
     margins = _constraint_margins(uls_utilization, sls_utilization, nfa_utilization, fls_utilization)
@@ -452,7 +492,7 @@ def evaluate_monopile(inputs: DesignInputs, geometry: MonopileGeometry) -> Monop
     area_m2 = (math.pi / 4) * (d ** 2 - d_inner ** 2)
     steel_mass_t = area_m2 * geometry.embedded_length_m * STEEL_DENSITY_T_PER_M3
 
-    notes = list(soil_notes)
+    notes = list(soil_notes) + list(nfa_notes)
     if d > 7.5 or (geometry.embedded_length_m / d) < 4.0:
         notes.append(
             "Diameter > ~7.5 m or L/D < 4: classical p-y / Hetenyi closed-form "

@@ -34,15 +34,23 @@ def check_15mw_sand_converges():
     print("  PASS\n")
 
 
-def check_8mw_clay_flags_nonconvergence():
-    print("Case: 8 MW, 25 m water depth, clay (su=80 kPa) -- known non-converging edge case")
+def check_8mw_clay_converges_since_nfa_fix():
+    """
+    Before the 2026-07-16 NFA fix (see METHODOLOGY_REPORT.md Section 10),
+    this case hit the non-convergence guard. It now converges as a side
+    effect of the same two-segment-cantilever fix -- still flags the
+    separate, legitimate beta*L<2.5 soil-validity caveat (this case
+    genuinely is at the edge of the closed-form soil assumption's range).
+    """
+    print("Case: 8 MW, 25 m water depth, clay (su=80 kPa) -- previously non-converging, fixed by the NFA update")
     soil = SoilProfile(soil_type="clay", undrained_shear_strength_kpa=80.0, submerged_unit_weight_kn_m3=8.0)
     inputs = DesignInputs(turbine_mw=8.0, water_depth_m=25.0, soil=soil, hs_m=3.5, tp_s=8.0, current_m_s=0.4)
     result = size_monopile(inputs)
 
-    assert any("did not converge" in n for n in result.notes), \
-        "expected this case to report non-convergence (see METHODOLOGY_REPORT.md Section 10)"
-    print("  correctly reported non-convergence")
+    assert not any("did not converge" in n for n in result.notes), "expected this case to converge post-NFA-fix"
+    assert any("beta*L < 2.5" in n for n in result.notes), \
+        "expected the soil-validity caveat to still be flagged (separate, legitimate issue)"
+    print("  now converges; soil-validity caveat still correctly flagged")
     print("  PASS\n")
 
 
@@ -67,40 +75,46 @@ def check_turbine_library_matches_sources():
     print("  PASS\n")
 
 
-def check_nfa_known_broken_outside_15_20mw():
+def check_nfa_matches_real_geometries():
     """
-    Documents (does NOT hide) two NFA issues found 2026-07-16 when evaluating
-    the model at the *real* reference monopile geometries -- see
-    METHODOLOGY_REPORT.md Section 10. These assertions describe the current
-    (broken) behavior so a future fix is a visible, deliberate change to this
-    test, not a silent regression.
+    Fixed 2026-07-16 (see METHODOLOGY_REPORT.md Section 10 and
+    docs/methodology.md): the two-segment cantilever (pile-above-mudline +
+    tower, instead of one uniform "average tower" section) and the
+    soft-stiff band's degenerate-gap fallback. Verifies f0 at the *real*
+    reference monopile geometries against the two source reports.
     """
-    print("Case: NFA known-broken behavior outside 15-20 MW (documents bugs, not correctness)")
+    print("Case: NFA at real reference geometries (5MW/OC3, 22MW/IEA)")
 
-    # 5 MW / OC3 real geometry: model underpredicts f0 below its own band.
+    # 5 MW / OC3 real geometry (D=6m, t=60mm, L=36m, 20m water depth):
+    # f0 must now sit inside the turbine's own soft-stiff band.
     soil_5mw = SoilProfile(soil_type="sand", friction_angle_deg=36.0, submerged_unit_weight_kn_m3=10.0)
     inputs_5mw = DesignInputs(turbine_mw=5.0, water_depth_m=20.0, soil=soil_5mw, hs_m=3.0, tp_s=7.0, current_m_s=0.3)
     geom_5mw = MonopileGeometry(diameter_m=6.0, wall_thickness_m=0.060, embedded_length_m=36.0)
     result_5mw = evaluate_monopile(inputs_5mw, geom_5mw)
-    assert result_5mw.natural_frequency_hz < result_5mw.soft_stiff_band_hz[0], \
-        "expected known underprediction at the real OC3 5MW geometry (fix this assertion if NFA is corrected)"
-    print(f"  5MW: f0={result_5mw.natural_frequency_hz:.3f} Hz < band_low={result_5mw.soft_stiff_band_hz[0]:.3f} Hz (known issue)")
+    band_low_5mw, band_high_5mw = result_5mw.soft_stiff_band_hz
+    assert band_low_5mw <= result_5mw.natural_frequency_hz <= band_high_5mw, \
+        f"f0={result_5mw.natural_frequency_hz:.4f} Hz outside band [{band_low_5mw:.4f}, {band_high_5mw:.4f}]"
+    print(f"  5MW: f0={result_5mw.natural_frequency_hz:.4f} Hz, band=[{band_low_5mw:.4f}, {band_high_5mw:.4f}] Hz -- inside band")
 
-    # 22 MW / IEA real geometry: target band itself is inverted.
+    # 22 MW / IEA real geometry (D=10m, t=100mm, L=45m, 34m water depth):
+    # band must no longer be inverted, and f0 should land close to the
+    # report's own stated ~0.16 Hz (achieved first fore-aft frequency).
     soil_22mw = SoilProfile(soil_type="sand", friction_angle_deg=36.0, submerged_unit_weight_kn_m3=10.0)
     inputs_22mw = DesignInputs(turbine_mw=22.0, water_depth_m=34.0, soil=soil_22mw, hs_m=6.0, tp_s=10.5, current_m_s=0.5)
     geom_22mw = MonopileGeometry(diameter_m=10.0, wall_thickness_m=0.100, embedded_length_m=45.0)
     result_22mw = evaluate_monopile(inputs_22mw, geom_22mw)
-    band_low, band_high = result_22mw.soft_stiff_band_hz
-    assert band_low > band_high, \
-        "expected known band inversion at 22MW (fix this assertion if NFA is corrected)"
-    print(f"  22MW: band_low={band_low:.3f} Hz > band_high={band_high:.3f} Hz (known issue, inverted band)")
-    print("  PASS (bugs confirmed present, not fixed)\n")
+    band_low_22mw, band_high_22mw = result_22mw.soft_stiff_band_hz
+    assert band_low_22mw < band_high_22mw, "soft-stiff band is inverted -- fallback logic did not engage"
+    assert abs(result_22mw.natural_frequency_hz - 0.16) < 0.01, \
+        f"f0={result_22mw.natural_frequency_hz:.4f} Hz too far from the IEA 22MW report's stated ~0.16 Hz"
+    print(f"  22MW: f0={result_22mw.natural_frequency_hz:.4f} Hz (report states ~0.16 Hz), "
+          f"band=[{band_low_22mw:.4f}, {band_high_22mw:.4f}] Hz -- valid, not inverted")
+    print("  PASS\n")
 
 
 if __name__ == "__main__":
     check_turbine_library_matches_sources()
     check_15mw_sand_converges()
-    check_8mw_clay_flags_nonconvergence()
-    check_nfa_known_broken_outside_15_20mw()
+    check_8mw_clay_converges_since_nfa_fix()
+    check_nfa_matches_real_geometries()
     print("All checks passed.")
