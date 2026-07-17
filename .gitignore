@@ -5,3 +5,8 @@ venv/
 
 # Parallel development effort with a different tool -- not part of this repo.
 /Codex/
+
+# Kept local-only per user request (2026-07-17) -- not published to GitHub.
+/CLAUDE.md
+/docs/methodology.md
+/docs/Monopile_Initial_Design_Method_Summary.md

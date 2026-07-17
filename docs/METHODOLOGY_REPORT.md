@@ -5,6 +5,9 @@ in the code as-implemented, so there is no ambiguity between this document and
 the source. Section numbers reference the corresponding function in
 `engine.py`. Concept-level screening only — not certification or FEED design.
 
+Note: `methodology.md` (referenced below as the dated decision log) is kept
+local-only and is not part of this published repo.
+
 ---
 
 ## 0. Process overview
@@ -20,8 +23,9 @@ the source. Section numbers reference the corresponding function in
       checks, each returning a utilization ratio (pass if ≤ 1.0).
    d. Compute steel mass/cost and collect validity-range notes.
 4. If all four utilizations are ≤ 1.0, stop (converged).
-5. Otherwise, adjust diameter, wall thickness, or embedded length per the
-   step-wise rule in §9 and go back to 3.
+5. Otherwise, adjust diameter or wall thickness per the step-wise rule in §9
+   and go back to 3. (Embedded length is *not* an independently-adjusted
+   lever here — see the embedment note in §9.)
 6. Stop at convergence, at a runaway guard (diameter ≥ 3× the initial guess),
    or after 500 iterations — whichever comes first.
 
@@ -123,7 +127,7 @@ appears. Units follow the MN-based convention from §0.
 | Symbol | Meaning | Units |
 |---|---|---|
 | `sigma_char` | characteristic (unfactored) bending stress used for fatigue, `M_char / Z` | MPa |
-| `fatigue_load_factor` | assumed ratio converting `sigma_char` to a fatigue-equivalent stress range (`FATIGUE_LOAD_FACTOR` = 0.17) | – |
+| `fatigue_load_factor` | assumed ratio converting `sigma_char` to a fatigue-equivalent stress range (`FATIGUE_LOAD_FACTOR` = 0.176) | – |
 | **`delta_sigma_eq`** | **equivalent constant-amplitude stress range** for the Palmgren-Miner check, `fatigue_load_factor × sigma_char` | MPa |
 | `N_allow` | allowable cycles to failure at `delta_sigma_eq`, from the S-N curve | – |
 | `rpm_avg` | average rotor speed used for cycle counting, `0.5 × (rpm_min + rpm_max)` | rpm |
@@ -304,11 +308,22 @@ simplification in §7.)
   (clamped to the table's end values outside 28–40°).
 - **Clay**: `k_soil = 0.25 × su_kPa / 1000` (MN/m³) — a **rough
   Terzaghi-style correlation**, constant with depth, not adjusted for strain
-  level (ε50) as detailed API/DNV clay p-y curves would be.
+  level (ε50) as detailed API/DNV clay p-y curves would be. `su_kPa` is
+  `SoilProfile.undrained_shear_strength_kpa`, **default 75 kPa** — a plain
+  user input from site investigation (triaxial/vane shear tests), not
+  derived by the code.
 
 **Validity flag:** if `beta × L < 2.5`, the pile is too short/rigid relative
 to the soil for the semi-infinite-beam assumption to hold; the code appends
 a note to that effect rather than silently returning an unreliable value.
+**On the threshold value itself:** `2.5` is a commonly-used rule-of-thumb in
+beam-on-elastic-foundation literature (Hetenyi's original 1946 text, and
+texts such as Poulos & Davis, discuss "long/flexible" pile behavior once
+`beta×L` exceeds some threshold), but different sources use different cutoffs
+in roughly the 2–4 range (e.g. `π≈3.14` is also commonly cited for a fully
+"long" pile) — this code's specific choice of 2.5 is not pinned to one
+numbered reference, so treat it as indicative rather than a precise
+code-mandated limit.
 
 ---
 
@@ -512,7 +527,7 @@ rainflow-counted multi-bin fatigue simulation:
 ```
 sigma_char = M_char / Z                         (characteristic bending stress, same Z as ULS,
                                                   M_char = M_thrust + M_wave from §3)
-delta_sigma_eq = FATIGUE_LOAD_FACTOR * sigma_char     (FATIGUE_LOAD_FACTOR = 0.24, ad-hoc)
+delta_sigma_eq = FATIGUE_LOAD_FACTOR * sigma_char     (FATIGUE_LOAD_FACTOR = 0.176, ad-hoc)
 
 N_allow = 10 ^ (SN_LOG10_A - SN_M * log10(delta_sigma_eq))
 
@@ -564,10 +579,25 @@ case.
     geometry. Verified against the 8 MW/clay case (still converges, still
     flags the `beta·L<2.5` soil-validity caveat) and the turbine-library/NFA
     benchmark cases (unaffected, since they don't depend on this constant).
+  - Revised to **0.176** (2026-07-17): user flagged doubt about NFA's own
+    validity (separate issue, still pending — see §10) and asked for the
+    calibration to target the *true minimum* wall thickness (found by
+    bisection, excluding NFA from gating entirely) rather than whatever the
+    grow-only iteration loop happened to stop at. At fixed D=9.33 m,
+    L=46.67 m, the minimum thickness satisfying ULS+SLS+FLS scales
+    smoothly with `FATIGUE_LOAD_FACTOR`: ≈50 mm needs ≈0.1475 (but implies
+    D/t=186.7, exceeding the `dt_ratio_max=160` bound), ≈60 mm needs
+    ≈0.1765 — within bounds and close to the real IEA 15 MW reference
+    thickness (~55 mm). Rounded to **0.176**. Applying this also surfaced
+    that `size_monopile`'s growth loop never shrinks material (§9), which
+    was separately fixed by adding a post-convergence thickness-shrink step
+    — the two fixes together are why the current 15 MW case converges to
+    t≈60.8 mm (not the 84.8 mm quoted in the 0.24-era bullet above) with FLS
+    now governing again (utilization 0.952).
 
-  None of these three values are derived from a specific DLC spectrum,
+  None of these four values are derived from a specific DLC spectrum,
   wind/rotor-speed distribution, or rainflow-counted time series — **treat
-  0.24 as temporary, to be recalibrated once real turbine fatigue load data
+  0.176 as temporary, to be recalibrated once real turbine fatigue load data
   is available**. This remains **the single most influential unvalidated
   number in the fatigue check** — since FLS is frequently the governing
   constraint (see §10), this one placeholder effectively sets the final pile
@@ -596,20 +626,20 @@ would push `utilization_FLS` well past 1.0 for the same geometry — worth
 revisiting given FLS is already often governing.
 
 **Worked example** (15 MW, 35 m depth, sand φ=35°, `size_monopile` converged
-geometry with `FATIGUE_LOAD_FACTOR = 0.24`: D=9.33 m, t=84.8 mm, L=46.67 m —
-same geometry as the §10 verification run; only the fatigue factor changed,
-so ULS/SLS/NFA are unchanged and FLS now governs):
+geometry with `FATIGUE_LOAD_FACTOR = 0.176`: D=9.33 m, t=60.8 mm, L=46.67 m —
+current §10 verification run, reflecting both the 0.176 recalibration and
+the thickness-shrink fix):
 
 | Quantity | Value |
 |---|---|
 | `M_char` | 474.7 MN·m |
-| `Z` | 5.649 m³ |
-| `sigma_char` | 84.05 MPa |
-| `delta_sigma_eq` (×0.24) | 20.17 MPa |
-| `N_allow` (S-N curve) | 1.76×10⁸ cycles |
+| `Z` | 4.082 m³ |
+| `sigma_char` | 116.29 MPa |
+| `delta_sigma_eq` (×0.176) | 20.47 MPa |
+| `N_allow` (S-N curve) | 1.69×10⁸ cycles |
 | `n_cycles` (27 yr life, rpm_avg=6.28, duty=0.9) | 8.03×10⁷ cycles |
-| `damage` | 0.456 |
-| `utilization_FLS` (×DFF=2.0) | 0.911 |
+| `damage` | 0.476 |
+| `utilization_FLS` (×DFF=2.0) | 0.952 |
 
 ---
 
@@ -642,6 +672,20 @@ After each adjustment, geometry is clamped to `dt_ratio ∈ [80, 160]` and
 `L/D ∈ [3, 8]` (both configurable in `DesignInputs`). `dt_ratio_max` was
 widened from 140 to 160 on 2026-07-16 to match the real D/t optimization
 bound used in the IEA 22 MW reference monopile design (§2).
+
+**Embedded length `L` has no independent design driver.** None of the four
+check-failure branches above (ULS/FLS/SLS/NFA) ever adjust `L` directly —
+only `D` and `t` do. `L` starts at `L0 = 5.0 × D0` (a fixed rule-of-thumb
+ratio, itself only a function of `D0`, not soil or load) and afterward only
+changes as a passive side effect of the `L/D ∈ [3, 8]` clamp reacting to `D`
+changes made for other reasons. There is no check anywhere in this model for
+what actually governs embedment in real design practice — ultimate
+lateral/moment soil capacity (e.g. Broms' method, or a p-y-based capacity
+check ensuring the pile doesn't rotate out of the soil under the design
+moment). The `beta×L < 2.5` validity flag (§4) is only a warning that the
+*stiffness* formula is out of its valid range — it never triggers the loop
+to lengthen the pile. In short: `L` is a derived ratio, not a solved-for
+design variable, in this model.
 
 **Stopping conditions:** all four utilizations ≤ 1.0 (converged), OR
 diameter reaches **3× the initial guess** (runaway guard — appends a
@@ -772,6 +816,7 @@ early screening:
 18. **No buckling check anywhere** — `_uls_check` is yield-only (von Mises vs. `STEEL_YIELD_MPA/GAMMA_M_ULS`); no local shell buckling or global Euler buckling is evaluated. Investigated 2026-07-17 (see §5): global buckling is very unlikely to govern (axial load tiny vs. elastic critical load); local shell buckling utilization is ≈1.07 at a realistic 10 m section length, close to governing but not decisively — deliberately not implemented at concept stage, since wall thickness here is a single constant value and a real design would taper it, making detailed buckling optimization now premature.
 19. `sigma_vm` in `_uls_check` omits axial stress (self-weight/pretension) and hoop/radial stress (external hydrostatic pressure) — only bending + shear are combined (§5).
 20. The post-convergence thickness-shrink step (§9, added 2026-07-16) only shrinks wall thickness, not diameter — a design could still be carrying more diameter than strictly necessary if diameter, not thickness, is what's over-conservative for a given case. NFA is explicitly excluded from driving any shrink, pending its own verification (see §10).
+21. **Embedded length `L` has no independent design driver** — it's a fixed `L/D=5` rule-of-thumb ratio at the initial guess, only ever changing as a passive side effect of the `L/D∈[3,8]` clamp when `D` changes for other reasons. No check evaluates ultimate lateral/moment soil capacity (e.g. Broms' method) to actually size embedment against load; `beta×L<2.5` (§4) is only a stiffness-formula validity warning, not a corrective design action (§9).
 
 Items 6–13 (soil and natural-frequency modeling) are the ones most likely to
 materially shift results if refined with real project data — see §4/§7 and

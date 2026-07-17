@@ -23,6 +23,10 @@ Key simplifications (all concept-stage, not detailed/FEED-grade):
 Each simplification is called out at its function. Treat outputs as a
 starting point for detailed design / PISA-based or FE validation, not a
 substitute for it -- see docs/Monopile_Initial_Design_Method_Summary.md.
+
+Note: docs/Monopile_Initial_Design_Method_Summary.md and docs/methodology.md
+(referenced in comments below) are kept local-only and are not part of this
+published repo.
 """
 from dataclasses import dataclass, field, asdict
 import math

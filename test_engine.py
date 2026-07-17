@@ -126,7 +126,7 @@ def check_turbine_library_matches_sources():
 def check_nfa_matches_real_geometries():
     """
     Fixed 2026-07-16 (see docs/METHODOLOGY_REPORT.md Section 10 and
-    docs/methodology.md): the two-segment cantilever (pile-above-mudline +
+    docs/methodology.md, kept local-only): the two-segment cantilever (pile-above-mudline +
     tower, instead of one uniform "average tower" section) and the
     soft-stiff band's degenerate-gap fallback. Verifies f0 at the *real*
     reference monopile geometries against the two source reports.

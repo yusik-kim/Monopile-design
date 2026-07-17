@@ -1,7 +1,8 @@
 # Reference: WISDEM MonopileSE vs. this engine
 
 Informational only — not a methodology decision (see `methodology.md` for the
-decision log). Captured 2026-07-16 after reviewing
+decision log, kept local-only and not part of this published repo). Captured
+2026-07-16 after reviewing
 [NLRWindSystems/WISDEM](https://github.com/NLRWindSystems/WISDEM)
 (`wisdem/fixed_bottomse/monopile.py`, `wisdem/commonse/environment.py`
 `TowerSoil`, `wisdem/commonse/utilization_{api,dnvgl,eurocode}.py`,
