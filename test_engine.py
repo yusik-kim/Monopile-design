@@ -4,7 +4,7 @@ Light, dependency-free sanity check for engine.py. Run directly:
     python test_engine.py
 
 No pytest/GUI required -- prints each check and raises AssertionError on
-failure. See METHODOLOGY_REPORT.md Sections 8 and 10 for the numbers this
+failure. See docs/METHODOLOGY_REPORT.md Sections 8 and 10 for the numbers this
 reproduces.
 """
 from engine import DesignInputs, SoilProfile, MonopileGeometry, evaluate_monopile, size_monopile, turbine_from_capacity
@@ -84,7 +84,7 @@ def check_22mw_sand_converges():
 
 def check_8mw_clay_converges_since_nfa_fix():
     """
-    Before the 2026-07-16 NFA fix (see METHODOLOGY_REPORT.md Section 10),
+    Before the 2026-07-16 NFA fix (see docs/METHODOLOGY_REPORT.md Section 10),
     this case hit the non-convergence guard. It now converges as a side
     effect of the same two-segment-cantilever fix -- still flags the
     separate, legitimate beta*L<2.5 soil-validity caveat (this case
@@ -103,7 +103,7 @@ def check_8mw_clay_converges_since_nfa_fix():
 
 
 def check_turbine_library_matches_sources():
-    print("Case: TURBINE_LIBRARY exact values match sourced reference turbines (see METHODOLOGY_REPORT.md Section 2)")
+    print("Case: TURBINE_LIBRARY exact values match sourced reference turbines (see docs/METHODOLOGY_REPORT.md Section 2)")
     oc3_5mw = turbine_from_capacity(5.0)
     assert oc3_5mw["rotor_diameter_m"] == 126.0
     assert oc3_5mw["hub_height_m"] == 90.0
@@ -125,7 +125,7 @@ def check_turbine_library_matches_sources():
 
 def check_nfa_matches_real_geometries():
     """
-    Fixed 2026-07-16 (see METHODOLOGY_REPORT.md Section 10 and
+    Fixed 2026-07-16 (see docs/METHODOLOGY_REPORT.md Section 10 and
     docs/methodology.md): the two-segment cantilever (pile-above-mudline +
     tower, instead of one uniform "average tower" section) and the
     soft-stiff band's degenerate-gap fallback. Verifies f0 at the *real*

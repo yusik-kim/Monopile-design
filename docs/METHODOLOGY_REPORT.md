@@ -661,7 +661,7 @@ thickness) or the `dt_ratio_max` floor is reached. This finds the true
 minimum-material wall thickness rather than just the first one the growth
 loop happened to land on. **Diameter is deliberately not shrunk** by this
 step — it also feeds the extreme-load calculation and NFA, and NFA is still
-pending its own verification (see `docs/methodology.md`), so widening the
+pending its own verification (see `methodology.md`), so widening the
 shrink logic to diameter is left for later. This changed the converged wall
 thickness for **every** verification case in §10, not just the ones where
 FLS governs — see the updated table there.
@@ -674,7 +674,7 @@ Cases were run against `size_monopile` and `evaluate_monopile` as sanity
 checks (not a unit test suite). Numbers below reflect the current model:
 `FATIGUE_LOAD_FACTOR = 0.176` (§8), the post-convergence thickness-shrink
 step (§9), and the two-segment cantilever + degenerate-gap NFA fallback
-(§7) — all updated 2026-07-16, see `docs/methodology.md`. `test_engine.py`
+(§7) — all updated 2026-07-16, see `methodology.md`. `test_engine.py`
 at the repo root reproduces all of these as runnable checks.
 
 | Case | Result | Governing check | Notes |

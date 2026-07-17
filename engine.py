@@ -22,7 +22,7 @@ Key simplifications (all concept-stage, not detailed/FEED-grade):
   rainflow-counted multi-bin DLC fatigue simulation.
 Each simplification is called out at its function. Treat outputs as a
 starting point for detailed design / PISA-based or FE validation, not a
-substitute for it -- see Monopile_Initial_Design_Method_Summary.md.
+substitute for it -- see docs/Monopile_Initial_Design_Method_Summary.md.
 """
 from dataclasses import dataclass, field, asdict
 import math
