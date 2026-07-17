@@ -533,11 +533,18 @@ def evaluate_monopile(inputs: DesignInputs, geometry: MonopileGeometry) -> Monop
 # ---------------------------------------------------------------------------
 def _initial_geometry(inputs: DesignInputs, turbine: dict) -> MonopileGeometry:
     """Rule-of-thumb starting guess, refined by the iteration loop below.
-    Diameter regressed against two published anchor points (~7 m at 8 MW,
-    ~11 m at 20 MW); embedded length at mid-range L/D=5; wall thickness at
+    Diameter regressed against two real reference-monopile anchor points
+    (6.0 m at 5 MW -- OC3/NREL; 10.0 m at 15 MW -- IEA, see TURBINE_LIBRARY
+    sources); embedded length at mid-range L/D=5; wall thickness at
     mid-range D/t=110.
+
+    Fixed 2026-07-17: this previously anchored to 7 m at 8 MW / 11 m at 20 MW,
+    leftover from the original six-turbine hand-estimated library (8-20 MW)
+    that TURBINE_LIBRARY replaced on 2026-07-16 with sourced 5/10/15/22/25 MW
+    anchors -- the formula was never updated to match, so it extrapolated
+    off turbine data that no longer existed in the code.
     """
-    d_initial_m = 7.0 + (11.0 - 7.0) * (turbine["mw"] - 8.0) / (20.0 - 8.0)
+    d_initial_m = 6.0 + (10.0 - 6.0) * (turbine["mw"] - 5.0) / (15.0 - 5.0)
     l_initial_m = 5.0 * d_initial_m
     t_initial_m = d_initial_m / 110.0
     return MonopileGeometry(diameter_m=d_initial_m, wall_thickness_m=t_initial_m, embedded_length_m=l_initial_m)

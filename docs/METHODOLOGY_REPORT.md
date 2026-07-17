@@ -478,6 +478,60 @@ m_eff   = (m_RNA + 0.25*m_tower) * 1000          [kg]   (0.25 = standard Rayleig
 
 f0 = (1/(2*pi)) * sqrt(k_eq_in_N_per_m / m_eff)   [Hz]
 ```
+
+**Reference and derivation.** This whole flexibility-superposition approach
+— not just the omitted `K_LM` term below — is the standard simplified
+natural-frequency method from **Arany et al. (2017)**, the same "10-step"
+paper already cited as this engine's primary methodology reference (this
+check *is* step 7 of that method). Related earlier work by Arany,
+Bhattacharya, Adhikari & Hogan on OWT natural frequency via foundation
+flexibility uses the same approach.
+
+`flexibility` is deflection-per-unit-force (the reciprocal of stiffness). It
+adds across elements connected **in series along the same load path** — the
+same principle as electrical resistances in series, or springs stacked
+end-to-end (`1/k_total = 1/k1 + 1/k2`).
+
+**`h^3/(3*EI)` reference:** the classical Euler-Bernoulli cantilever tip
+-deflection formula for a uniform beam fixed at one end, free at the other,
+under a point force at the tip (`delta = F*h^3/(3EI)`) — standard textbook
+structural mechanics (Timoshenko, Hibbeler, or *Roark's Formulas for Stress
+and Strain*), not offshore-wind-specific.
+
+**Why the two-segment `cantilever_flexibility` splits additively (exact, not
+approximate):** for a cantilever of total height `h` under a tip force `F`,
+the bending moment at any section a distance `z` from the base is
+`M(z) = F*(h-z)` — identical form whether `z` is in the pile segment or the
+tower segment, since it only depends on distance to the tip. The unit-load
+(virtual work / Castigliano) method gives:
+```
+flexibility = integral from 0 to h of (h-z)^2 / EI(z) dz
+```
+Splitting this integral at the segment boundary (`z = pile_above_mudline`,
+where `tower_height = h - pile_above_mudline`) and evaluating each piece:
+```
+integral from 0 to pile_above_mudline of (h-z)^2/EI_pile dz   =  (h^3 - tower_height^3) / (3*EI_pile)
+integral from pile_above_mudline to h of (h-z)^2/EI_tower dz  =  tower_height^3 / (3*EI_tower)
+```
+Adding them gives exactly the `cantilever_flexibility` line above — the
+additive form is a genuine closed-form result of linear beam theory for a
+stepped-EI cantilever under a tip load, not a simplifying assumption.
+
+**Why `1/K_L` and `h^2/K_R` extend the same series-flexibility principle:**
+- `1/K_L`: pure lateral translation of the pile head. `K_L` is *defined* as
+  force/displacement, so its reciprocal is displacement-per-force directly.
+- `h^2/K_R`: base **rotation** propagated up to the tip. A lateral force `F`
+  at height `h` creates an overturning moment `M = F*h` at the base, causing
+  a base rotation `theta = M/K_R = F*h/K_R`. Propagated rigidly up through
+  height `h` (small-angle assumption), that rotation adds an *extra* tip
+  deflection `y = theta*h = F*h^2/K_R`. Dividing by `F` gives the flexibility
+  contribution `h^2/K_R`.
+
+All three terms represent the same tip force flowing through three things in
+series — cantilever bending, foundation translation, foundation rocking —
+so by the superposition principle (valid for any linear elastic system)
+their flexibilities simply add.
+
 Still omits the `K_LM` cross-coupling term that Arany's full 3-spring model
 includes (a documented simplification, unchanged).
 
@@ -647,13 +701,20 @@ the thickness-shrink fix):
 
 **Initial geometry (rule of thumb, then refined by iteration):**
 ```
-D0 = 7.0 + (11.0 - 7.0) * (turbine_mw - 8.0) / (20.0 - 8.0)   [m]   (linear
-     regression between two anchor points: ~7 m at 8 MW, ~11 m at 20 MW —
-     not independently validated, chosen to be "close enough" as a starting
-     point for iteration)
+D0 = 6.0 + (10.0 - 6.0) * (turbine_mw - 5.0) / (15.0 - 5.0)   [m]   (linear
+     regression between two real reference-monopile diameters:
+     6.0m at 5MW/OC3, 10.0m at 15MW/IEA -- see TURBINE_LIBRARY sources, §2)
 L0 = 5.0 * D0            (mid of the allowed L/D range, default 3-8)
 t0 = D0 / 110.0           (mid of the allowed D/t range, default 80-160)
 ```
+**Fixed 2026-07-17** (see §10): this was previously anchored to `7.0m at
+8MW / 11.0m at 20MW`, leftover from the original six-turbine hand-estimated
+library that `TURBINE_LIBRARY` replaced on 2026-07-16 — extrapolating off
+turbine data that no longer existed in the code. Now anchored to the two
+best-sourced real reference diameters instead. Still just a starting guess
+for the loop below, not independently validated for turbine sizes away from
+those two anchors (e.g. 22 MW extrapolates to D0=12.8m, well past the real
+-but-externally-capped 10m reference — see the table in §10).
 
 **Step-wise iteration** (step sizes: `d_step = 0.15 m`, `t_step = 0.002 m`),
 each iteration re-evaluates all four checks and adjusts **one** dimension
@@ -710,6 +771,22 @@ shrink logic to diameter is left for later. This changed the converged wall
 thickness for **every** verification case in §10, not just the ones where
 FLS governs — see the updated table there.
 
+**The same "zero iterations" pattern applies to diameter, and therefore to
+embedded length too** (found 2026-07-17, while investigating a Streamlit
+front-end run that showed `L/D` exactly 5.000 and `D/t` exactly 160 for
+every turbine size tried): the growth loop only grows `D` when NFA, ULS,
+FLS, or SLS is actively failing at the current geometry. For most turbine
+sizes tested, `D0` from `_initial_geometry` already satisfies every check,
+so `D` never moves from its initial guess either — meaning `L/D = 5.0000`
+isn't a solved or validated result in those cases, it's the untouched
+initial-guess ratio (`L0 = 5.0*D0`), which nothing in this loop ever revisits
+independently (§4's embedment note explains why `L` has no capacity-based
+driver of its own). Combined with the thickness floor above, this means a
+result like "D=9.67m, t=60.4mm, D/t=160.00, L/D=5.0000" can look like a
+converged, optimized design while actually being almost entirely the raw
+starting guess plus one artificial ceiling — worth keeping in mind when
+reading any single result from this tool in isolation.
+
 ---
 
 ## 10. Verification performed
@@ -717,28 +794,36 @@ FLS governs — see the updated table there.
 Cases were run against `size_monopile` and `evaluate_monopile` as sanity
 checks (not a unit test suite). Numbers below reflect the current model:
 `FATIGUE_LOAD_FACTOR = 0.176` (§8), the post-convergence thickness-shrink
-step (§9), and the two-segment cantilever + degenerate-gap NFA fallback
-(§7) — all updated 2026-07-16, see `methodology.md`. `test_engine.py`
-at the repo root reproduces all of these as runnable checks.
+step (§9), the two-segment cantilever + degenerate-gap NFA fallback (§7),
+and the corrected `_initial_geometry` diameter anchors (§9) — see
+`methodology.md`. `test_engine.py` at the repo root reproduces all of these
+as runnable checks. Verification is limited to the three turbine sizes with
+a **real reference monopile design** to compare against (5/15/22 MW); a
+20 MW row (interpolated turbine, no real design) and an 8 MW/clay synthetic
+edge-case were removed 2026-07-17 for lacking that comparison — see
+`methodology.md` for what those cases had been checking.
 
 | Case | Result | Governing check | Notes |
 |---|---|---|---|
-| 15 MW, 35 m depth, sand (φ=35°) | D=9.33 m, t=60.8 mm, L=46.67 m (L/D≈5.0) | **FLS** (margin 0.048) | Wall thickness now close to the real IEA 15 MW reference (~55 mm) rather than the pre-shrink 84.8 mm; FLS governing matches industry expectation and this project's research summary |
-| 20 MW, 45 m depth, sand (φ=38°) | D=11.0 m, t=68.8 mm, L=55 m (L/D=5.0) | **NFA** (margin 0.166) | Thickness dropped from a pre-shrink 100.0 mm to the true minimum once ULS/FLS/SLS all had margin to spare |
-| 5 MW, 20 m depth, sand (φ=36°) | D=6.00 m, t=37.5 mm, L=30.0 m (L/D=5.0) | **NFA** (margin 0.043) | Diameter still matches the real OC3 monopile (6 m); thickness now well below the real 60 mm — NFA is the binding constraint, not FLS/ULS, at this size |
-| 22 MW, 34 m depth, sand (φ=36°) | D=11.67 m, t=72.9 mm, L=58.3 m (L/D=5.0) | **NFA** (margin 0.216) | Real IEA 22MW design caps diameter at 10 m (an explicit optimizer bound not replicated here); thickness dropped from a pre-shrink 106.1 mm |
-| 8 MW, 25 m depth, clay (su=80 kPa) | D=8.20 m, t=61.6 mm, L=35.0 m (L/D≈4.3) | **NFA** (margin 0.002) | Also flags `beta*L < 2.5` — the closed-form soil assumption is genuinely at the edge of its valid range for this combination; correctly flagged rather than silently ignored. NFA margin is now razor-thin (0.002) — see the open-questions note on NFA below |
+| 5 MW, 20 m depth, sand (φ=36°) | D=6.00 m, t=37.5 mm, L=30.0 m (L/D=5.0, D/t=160) | **NFA** (margin 0.043) | Diameter matches the real OC3 monopile (6 m) exactly (it's now literally one of `_initial_geometry`'s two anchor points); thickness well below the real 60 mm |
+| 15 MW, 35 m depth, sand (φ=35°) | D=10.00 m, t=62.5 mm, L=50.0 m (L/D=5.0, D/t=160) | **NFA** (margin 0.196) | Diameter now matches the real IEA 15 MW reference (10 m) exactly, for the same reason. FLS no longer governs here (0.583, was 0.952 before the anchor fix) — see the note below |
+| 22 MW, 34 m depth, sand (φ=36°) | D=12.80 m, t=80.0 mm, L=64.0 m (L/D=5.0, D/t=160) | **NFA** (margin 0.260) | Real IEA 22 MW design caps diameter at 10 m (an explicit optimizer bound not replicated here); this tool's diameter grows past that cap, same as before the anchor fix |
 
-**The thickness-shrink step (§9) changed every case above**, not just the
-one where FLS governs — every case was previously stuck at an
-over-conservative initial-guess thickness that the grow-only loop never
-questioned. A consequence worth flagging: with thinner walls now the norm,
-**NFA sits close to its 1.0 limit in four of the five cases** (margins
-0.166, 0.043, 0.216, and especially 0.002 for the 8 MW/clay case) — where
-before, thicker walls gave NFA more incidental headroom. Since NFA is
-explicitly not yet verified (open question below), the model's overall
-reliability is now more exposed to whatever that verification finds than it
-was before this change.
+**Every case above now sits at exactly `D/t = 160`** — the configured
+`dt_ratio_max` ceiling, not a value derived from any check this model
+evaluates. Before the 2026-07-17 `_initial_geometry` fix (see §9), 15 MW
+was the one case where FLS happened to bind before reaching that ceiling
+(utilization 0.952, governing). Correcting the diameter anchors moved 15 MW
+to the same larger, more-real diameter as the other real-turbine cases —
+which also means less bending stress, so FLS no longer binds there either
+(0.583). **All three real-turbine verification cases now hit the same
+artificial thickness floor, governed by NFA with no other check close
+behind.** This sharpens rather than resolves the missing-buckling-check gap
+(§5/§11 item 18): the empirical comparison against real reference designs
+(5 MW needs ~60mm/D-t=100, 22 MW needs ~100mm/D-t=100, both roughly 1.4-1.6x
+this tool's output — see the sensitivity analysis referenced in
+`methodology.md`) now applies uniformly across every verified case, not
+just two of them.
 
 Two bugs were found and fixed during verification, both while testing the
 newly-sourced 5 MW/OC3 and 22 MW/IEA turbines (§2) against their *real*
@@ -768,24 +853,37 @@ ever been checked against 15/20 MW:
    EI) plus a tower segment (average-tower EI) per §7, and adding a fallback
    band definition when the classical gap is degenerate. **Result:** the 22
    MW case now predicts `f0 = 0.1600 Hz`, matching the report's own stated
-   achieved value (~0.16 Hz) to 3 significant figures; the 5 MW case now
-   falls inside its band; and the previously-non-converging 8 MW/clay case
-   now converges too, as a side effect of the same fix.
+   achieved value (~0.16 Hz) to 3 significant figures, and the 5 MW case now
+   falls inside its band.
+3. **Stale `_initial_geometry` diameter anchors** (found and fixed
+   2026-07-17): the initial-guess formula (§9) was still anchored to `7.0m
+   at 8MW / 11.0m at 20MW` — leftover from the *original* six-turbine
+   hand-estimated library, unrelated to `TURBINE_LIBRARY`'s 2026-07-16
+   replacement with sourced 5/10/15/22/25 MW anchors. This was found while
+   investigating why a Streamlit front-end run showed `L/D` exactly 5.000
+   and `D/t` exactly 160 for every turbine size tried: the growth loop
+   almost never actually iterates (the initial guess already satisfies
+   every check for nearly every turbine size), so what looked like a solved
+   design was usually just the untouched rule-of-thumb starting point.
+   Fixed by re-anchoring to the two best-sourced real reference diameters
+   (6.0m at 5MW / 10.0m at 15MW). **Result:** 15 MW's diameter now lands at
+   exactly 10.0m — the real IEA reference value — since it's now literally
+   one of the two anchor points.
 
-Both bugs were caught because `size_monopile` failed to converge and
-flagged it rather than silently returning a plausible-looking wrong answer
-— see the non-convergence note in §9. The NFA formula itself (§7) has been
-checked against real f0 values at four real turbine sizes (5/15/20/22 MW),
-but **the NFA check as a whole is explicitly not yet considered verified**
-by the user (2026-07-16) pending further review — separate from whether its
-frequency prediction matches published values, open questions remain about
-whether it's the right check to be governing designs at all. This matters
-more now than before the thickness-shrink step (§9): NFA margins are razor
--thin in several cases in the table above (as low as 0.002), so any
-correction to NFA found during that later verification could materially
-change several of these converged designs. The 25 MW extrapolated turbine
-entry (§2) remains unverified for a separate reason, since it isn't a real
-reference turbine.
+Both original bugs were caught because `size_monopile` failed to converge
+and flagged it rather than silently returning a plausible-looking wrong
+answer — see the non-convergence note in §9. The NFA formula itself (§7)
+has been checked against real f0 values at the two turbine sizes with a
+sourced reference geometry (5/22 MW), but **the NFA check as a whole is
+explicitly not yet considered verified** by the user (2026-07-16) pending
+further review — separate from whether its frequency prediction matches
+published values, open questions remain about whether it's the right check
+to be governing designs at all. This matters more than ever now: every
+verified case sits at the same artificial `D/t=160` floor with NFA as the
+only check anywhere close to binding (see the table above) — any future
+correction to NFA is now the single biggest lever on every converged
+design in this report. The 25 MW extrapolated turbine entry (§2) remains
+unverified for a separate reason, since it isn't a real reference turbine.
 
 ---
 
@@ -808,7 +906,7 @@ early screening:
 10. Tower average diameter/thickness regressed from hub height alone, calibrated to one data point (IEA 15 MW) — now used only for the tower segment above the transition piece (§7), which reduced its impact on the overall result, but the regression itself is still single-point-calibrated.
 11. RNA/tower mass split assumed 50/50 of total turbine mass (updated 2026-07-16 from a 40/60 guess) — real observed range is 43.6%–54.2% across the four sourced turbines.
 12. Rayleigh effective-mass factor of 0.25 for the tower's tip-mass contribution.
-13. Natural-frequency model omits the `K_LM` foundation cross-coupling term. The band-inversion bug for wide-rotor-speed-range turbines (e.g. 22 MW) was found and fixed 2026-07-16 with a documented fallback (§7) — validated against 5/15/20/22 MW; the 25 MW extrapolated entry is unverified.
+13. Natural-frequency model omits the `K_LM` foundation cross-coupling term. The band-inversion bug for wide-rotor-speed-range turbines (e.g. 22 MW) was found and fixed 2026-07-16 with a documented fallback (§7) — checked against real f0 values at 5/22 MW (sourced reference geometries); the 15 MW comparison is informational only (estimated reference thickness, not a table value); the 25 MW extrapolated entry is unverified.
 14. Fatigue `FATIGUE_LOAD_FACTOR = 0.176` (ratio of fatigue-driving stress range to extreme characteristic stress) — revised 2026-07-16, chosen via a sensitivity sweep (excluding NFA from the target) to put the 15 MW reference case's true-minimum wall thickness at ≈60 mm, close to the real IEA 15 MW reference (~55 mm); still an ad-hoc placeholder pending recalibration against real turbine fatigue load data, and the single most influential unvalidated FLS number.
 15. Fatigue cycle count uses one cycle per rotor revolution at the min/max rpm average, not a wind-speed distribution.
 16. Single DNV-RP-C203-style S-N curve (`log10(a)=12.16`, `m=3`) applied structure-wide, not joint-specific.
@@ -817,6 +915,7 @@ early screening:
 19. `sigma_vm` in `_uls_check` omits axial stress (self-weight/pretension) and hoop/radial stress (external hydrostatic pressure) — only bending + shear are combined (§5).
 20. The post-convergence thickness-shrink step (§9, added 2026-07-16) only shrinks wall thickness, not diameter — a design could still be carrying more diameter than strictly necessary if diameter, not thickness, is what's over-conservative for a given case. NFA is explicitly excluded from driving any shrink, pending its own verification (see §10).
 21. **Embedded length `L` has no independent design driver** — it's a fixed `L/D=5` rule-of-thumb ratio at the initial guess, only ever changing as a passive side effect of the `L/D∈[3,8]` clamp when `D` changes for other reasons. No check evaluates ultimate lateral/moment soil capacity (e.g. Broms' method) to actually size embedment against load; `beta×L<2.5` (§4) is only a stiffness-formula validity warning, not a corrective design action (§9).
+22. **For most turbine sizes, the growth loop runs zero iterations** — `_initial_geometry`'s starting guess already satisfies ULS/SLS/NFA/FLS, so `D` (and therefore `L`, via the fixed `L/D=5` ratio) never moves from the initial guess at all. Combined with items 20/21, a result can look like a converged, optimized design while actually being almost entirely the raw starting guess plus the `dt_ratio_max` thickness ceiling (§9/§10).
 
 Items 6–13 (soil and natural-frequency modeling) are the ones most likely to
 materially shift results if refined with real project data — see §4/§7 and
