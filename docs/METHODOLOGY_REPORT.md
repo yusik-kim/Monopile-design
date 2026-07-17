@@ -19,10 +19,11 @@ local-only and is not part of this published repo.
 3. Evaluate the candidate geometry (`evaluate_monopile`):
    a. Compute mudline extreme moment/shear from wind + wave/current (§3).
    b. Compute closed-form soil stiffness (K_L, K_R) (§4).
-   c. Run ULS (§5), SLS (§6), natural-frequency/soft-stiff (§7), and FLS (§8)
-      checks, each returning a utilization ratio (pass if ≤ 1.0).
+   c. Run ULS (§5), SLS (§6), natural-frequency/soft-stiff (§7), FLS (§8),
+      and local shell buckling (§8a) checks, each returning a utilization
+      ratio (pass if ≤ 1.0).
    d. Compute steel mass/cost and collect validity-range notes.
-4. If all four utilizations are ≤ 1.0, stop (converged).
+4. If all five utilizations are ≤ 1.0, stop (converged).
 5. Otherwise, adjust diameter or wall thickness per the step-wise rule in §9
    and go back to 3. (Embedded length is *not* an independently-adjusted
    lever here — see the embedment note in §9.)
@@ -127,7 +128,7 @@ appears. Units follow the MN-based convention from §0.
 | Symbol | Meaning | Units |
 |---|---|---|
 | `sigma_char` | characteristic (unfactored) bending stress used for fatigue, `M_char / Z` | MPa |
-| `fatigue_load_factor` | assumed ratio converting `sigma_char` to a fatigue-equivalent stress range (`FATIGUE_LOAD_FACTOR` = 0.176) | – |
+| `fatigue_load_factor` | assumed ratio converting `sigma_char` to a fatigue-equivalent stress range (`FATIGUE_LOAD_FACTOR` = 0.3) | – |
 | **`delta_sigma_eq`** | **equivalent constant-amplitude stress range** for the Palmgren-Miner check, `fatigue_load_factor × sigma_char` | MPa |
 | `N_allow` | allowable cycles to failure at `delta_sigma_eq`, from the S-N curve | – |
 | `rpm_avg` | average rotor speed used for cycle counting, `0.5 × (rpm_min + rpm_max)` | rpm |
@@ -153,6 +154,7 @@ appears. Units follow the MN-based convention from §0.
 | `RHO_SEAWATER_KG_M3` | 1025 kg/m³ | seawater density |
 | `STEEL_DENSITY_T_PER_M3` | 7.85 t/m³ | structural steel |
 | `STEEL_E_MPA` | 210,000 MPa | steel Young's modulus |
+| `STEEL_POISSON_RATIO` | 0.3 | steel Poisson's ratio — used only by the shell buckling check (§8a) |
 | `STEEL_YIELD_MPA` | 355 MPa | S355 offshore structural steel |
 | `USD_PER_T_STEEL` | 2,200 USD/t | rolled/welded monopile steel, concept-stage placeholder cost |
 | `GAMMA_F_ULS` | 1.35 | combined wind+wave load factor — **assumption**: a single blended DNV "normal safety class" factor, not separate per-load-type factors |
@@ -213,7 +215,7 @@ useful for validating `size_monopile` outputs against real designs):**
 | MW | Water depth (m) | Monopile base D (m) | Embedment (m) | D/t design bounds |
 |---|---|---|---|---|
 | 5 (OC3 Phase II) | 20 | 6.0 (constant) | 36 | t=60mm constant (D/t=100) |
-| 15 (IEA) | not stated in source | 10.0 | 45 | mudline wall thickness ≈50mm, tapering to ≈20-25mm near the tower top — read off Fig. 4-2 of the source report (diameter/thickness-vs-height plot), **image-derived estimate, not a table value** (2026-07-17) |
+| 15 (IEA) | not stated in source | 10.0 | 45 | mudline wall thickness ≈50mm, tapering to ≈20-25mm near the tower top — read off Fig. 4-2 of the source report (diameter/thickness-vs-height plot), **image-derived estimate, not a table value** (2026-07-17). **Now doubted (2026-07-18)**: this engine's own buckling-inclusive converged design lands at D/t≈99 for 15MW, matching the 5MW/22MW sourced references' D/t≈100 almost exactly — the ~50mm figure (D/t≈200) is very likely a misread of the chart, not the real mudline value; see §11. |
 | 22 (IEA) | 34 | 10.0 (max, bound met) | 45 | 80–160 (optimizer bound; not active at either end in the final design) |
 
 The 22 MW source's D/t design bound (80–160) is why `dt_ratio_max` was
@@ -375,43 +377,99 @@ check would include. For a large-diameter thin shell at depth, hydrostatic
 hoop stress is not necessarily negligible; it is not evaluated anywhere in
 this code.
 
-**Buckling is not checked anywhere in this model.** `_uls_check` is a pure
-yield check only (`sigma_vm` vs. `STEEL_YIELD_MPA / GAMMA_M_ULS`) — there is
-no local shell buckling check (axial/bending-induced, or external
--pressure-induced) and no global (Euler) buckling check. This matters
-because the sizing loop (§9) pushes wall thickness toward `dt_ratio_max`
-(thinnest allowed wall) whenever ULS/FLS aren't binding, and D/t ratios in
-the 80–160 range are squarely in territory where real monopile ULS design is
-very often **buckling-governed rather than yield-governed** (the kind of
-check DNV-RP-C202 / API RP 2A shell-buckling provisions cover — e.g. WISDEM's
-`commonse/utilization_dnvgl.py` `CylinderBuckling` class implements exactly
-this). A geometry that passes this engine's yield-only ULS check could still
-fail shell buckling in reality; there is no constraint in `size_monopile`
-preventing that.
+**`_uls_check` is a pure yield check only** (`sigma_vm` vs.
+`STEEL_YIELD_MPA / GAMMA_M_ULS`) — it does not evaluate shell buckling
+(axial/bending-induced, or external-pressure-induced) or global (Euler)
+column buckling. Real monopile ULS design is very often
+**buckling-governed rather than yield-governed** at these D/t ratios (the
+kind of check DNV-RP-C202 / API RP 2A shell-buckling provisions cover —
+e.g. WISDEM's `commonse/utilization_dnvgl.py` `CylinderBuckling` class).
+Local shell buckling is now implemented as its own check (§8a below); global
+(Euler) buckling is not, for the reason given there.
 
-**Investigated 2026-07-17, decided not to implement (concept stage):**
-- **Global (Euler) buckling** is rarely the design driver for a monopile —
-  the axial load (self-weight of RNA/tower/pile) is tiny relative to the
-  elastic critical buckling load of a large-diameter shell, so this check is
-  very unlikely to govern over ULS/FLS/NFA/local buckling in practice.
-- **Local shell buckling** was checked by hand (DNV-RP-C202 method,
-  cross-checked against WISDEM's `utilization_dnvgl.CylinderBuckling`) at
-  the 15 MW reference case's converged geometry. Using a single unstiffened
-  panel spanning the full 35 m exposed water column gives utilization ≈2.2
-  (fails badly), but that panel-length assumption is unrealistic — WISDEM
-  itself runs this check per discretized section (a few meters to ~10s of
-  meters), not over the whole exposed shaft. At a **10 m** section length
-  (a reasonable stand-in for real fabrication/can lengths), utilization
-  comes out to **≈1.07** — close to governing, but not by a wide margin.
-- **Decision:** do not implement a buckling check in `engine.py` for now.
-  At concept stage, wall thickness is a single constant value along the
-  whole pile; a real design tapers thickness with depth (thicker at the
-  mudline, thinner toward the interface — see the FLS discussion above).
-  Since buckling utilization is this sensitive to exactly the parameters
-  (thickness distribution, actual section/can length) that concept stage
-  hasn't fixed yet, refining a buckling check now would be precision spent
-  on a shape that later design stages will change anyway. Revisit once
-  the model supports a thickness taper and real section lengths are known.
+---
+
+## 8a. Local shell buckling check (`_shell_buckling_check`) — added 2026-07-18
+
+**History:** first investigated 2026-07-17 and deliberately *not*
+implemented — a hand calculation at the 15 MW case using a single
+unstiffened panel spanning the full 35 m exposed water column gave
+utilization ≈2.2 (fails badly), but that assumed the entire exposed shaft
+was one buckling panel, which seemed unrealistically conservative at the
+time. A follow-up sensitivity analysis (varying panel length, then
+comparing the resulting thickness against the real OC3/IEA reference
+designs for 5 MW and 22 MW) found the opposite of the original hypothesis:
+short, fabrication-realistic panel lengths make buckling *easier* to
+satisfy (not harder), and matching the real reference thicknesses requires
+a panel length close to the *entire* exposed shaft — consistent with these
+monopiles having **no dedicated ring stiffeners at all** (large modern
+monopiles typically vary thickness can-by-can instead). That reframing
+justified implementing the check with `l_panel = water_depth + freeboard`
+(the exposed above-mudline length), not can length. See
+`docs/local_shell_buckling_method.md` for the full method derivation.
+
+**Method — DNV-RP-C202, unstiffened cylinder:**
+```
+Z_batdorf = (l_panel^2 / (r*t)) * sqrt(1 - nu^2)          (nu = 0.3, steel)
+
+C_axial_bending = psi*sqrt(1+(rho*xi/psi)^2)   psi=1,    xi=0.702*Z_batdorf,      rho=0.5*(1+r/(150t))^-0.5
+C_torsion       = psi*sqrt(1+(rho*xi/psi)^2)   psi=5.34, xi=0.856*Z_batdorf^0.75, rho=0.6
+C_lateral       = psi*sqrt(1+(rho*xi/psi)^2)   psi=4,    xi=1.04*sqrt(Z_batdorf), rho=0.6
+
+fE(C) = (C * pi^2 * E) / (12*(1-nu^2)) * (t/l_panel)^2
+fea = fE(C_axial_bending)   fet = fE(C_torsion)   feh = fE(C_lateral)
+
+sigma_bending = M_uls/Z_sec            (M_uls = GAMMA_F_ULS * M_char, same as ULS)
+sigma_axial   = axial_load_estimate/A  (RNA+tower weight + pile self-weight -- see below)
+tau_shear     = V_uls/(0.5*A)
+sigma_hoop    = (rho_seawater*g*water_depth)*r/t   (external hydrostatic pressure)
+
+# DNV convention: only the compressive part of each stress counts.
+axial = |min(-(sigma_axial+sigma_bending), 0)|
+hoop  = |min(-sigma_hoop, 0)|
+shear = |tau_shear|
+sigma_vM = sqrt(((axial+hoop)/2)^2 + 3*(((axial-hoop)/2)^2 + shear^2))
+
+lambda_s = sqrt((fy/sigma_vM) * (axial/fea + shear/fet + hoop/feh))
+gamma_m  = 1.15 if lambda_s<0.5; 1.45 if lambda_s>=1.0; else 0.85+0.6*lambda_s
+fks      = fy / sqrt(1+lambda_s^4)
+fksd     = fks/gamma_m
+
+utilization_Buckling = sigma_vM / fksd
+```
+Cross-checked against WISDEM's open-source DNV-RP-C202 implementation
+(`wisdem/commonse/utilization_dnvgl.py`, `CylinderBuckling` class) for the
+same coefficient formulas.
+
+**`l_panel` = the exposed above-mudline shaft length** (`water_depth_m +
+transition_piece_height_m`), **not** can length. This is a deliberate
+modeling choice, not an approximation of convenience: `l_panel` in
+DNV-RP-C202 means the spacing between **ring stiffeners** specifically —
+dedicated structural elements that resist the ovalization/buckling mode —
+not the spacing between fabrication can-to-can weld seams, which don't
+provide the same restraint. Since this model assumes no ring stiffeners
+exist anywhere on the pile, the unsupported length is the full exposed
+shaft; the embedded portion is excluded because soil continuously restrains
+it there.
+
+**`axial_load_estimate` (`_axial_load_estimate`):** a rough self-weight
+figure — RNA+tower mass from `TURBINE_LIBRARY` plus the pile's own steel
+weight above mudline, times gravity. Used only by this check; ULS/SLS/FLS
+don't need it, since they only combine bending and shear from the extreme
+lateral load.
+
+**Global (Euler) column buckling remains unimplemented** — investigated
+alongside local buckling on 2026-07-17 and found very unlikely to govern
+(axial load is tiny relative to the elastic critical buckling load of a
+large-diameter shell), so it wasn't worth the added complexity.
+
+**Effect on convergence:** before this check existed (through 2026-07-17),
+`size_monopile`'s 15 MW case converged to `t≈50mm` — ULS/SLS/NFA/FLS all had
+comfortable margin at that thickness, and nothing caught that an unstiffened
+wall this thin, at this pile's proportions, fails shell buckling by roughly
+2x. With the check now integrated into both the growth and shrink phases of
+`size_monopile` (§9), converged wall thickness increased substantially
+across every turbine size tested — see the updated table in §10.
 
 ---
 
@@ -581,7 +639,7 @@ rainflow-counted multi-bin fatigue simulation:
 ```
 sigma_char = M_char / Z                         (characteristic bending stress, same Z as ULS,
                                                   M_char = M_thrust + M_wave from §3)
-delta_sigma_eq = FATIGUE_LOAD_FACTOR * sigma_char     (FATIGUE_LOAD_FACTOR = 0.176, ad-hoc)
+delta_sigma_eq = FATIGUE_LOAD_FACTOR * sigma_char     (FATIGUE_LOAD_FACTOR = 0.3, ad-hoc)
 
 N_allow = 10 ^ (SN_LOG10_A - SN_M * log10(delta_sigma_eq))
 
@@ -645,17 +703,29 @@ case.
     thickness (~55 mm). Rounded to **0.176**. Applying this also surfaced
     that `size_monopile`'s growth loop never shrinks material (§9), which
     was separately fixed by adding a post-convergence thickness-shrink step
-    — the two fixes together are why the current 15 MW case converges to
-    t≈60.8 mm (not the 84.8 mm quoted in the 0.24-era bullet above) with FLS
-    now governing again (utilization 0.952).
+    — the two fixes together are why the 15 MW case converged to t≈60.8 mm
+    (not the 84.8 mm quoted in the 0.24-era bullet above) with FLS governing
+    (utilization 0.952), until the next revision below changed the picture
+    again.
+  - Revised to **0.3** (2026-07-18): the local shell buckling check (§8a) was
+    implemented, and 5/15/22 MW all now converge to buckling-governed (or
+    near-governed) geometries where FLS has real margin — the "FLS governs"
+    calibration target this constant was chasing no longer applies the same
+    way. Solving for the FLF that makes FLS=1.0 exactly at each of the three
+    buckling-inclusive geometries gives 0.282 (5MW) / 0.336 (15MW) / 0.547
+    (22MW) — average 0.389. Set instead to a rounder **0.3**: a deliberately
+    conservative concept-design choice, higher than the pre-buckling 0.176,
+    but **not** uniformly conservative across all three cases (it sits below
+    both the 15MW and 22MW individual fits, and below the three-case
+    average).
 
-  None of these four values are derived from a specific DLC spectrum,
+  None of these five values are derived from a specific DLC spectrum,
   wind/rotor-speed distribution, or rainflow-counted time series — **treat
-  0.176 as temporary, to be recalibrated once real turbine fatigue load data
+  0.3 as temporary, to be recalibrated once real turbine fatigue load data
   is available**. This remains **the single most influential unvalidated
-  number in the fatigue check** — since FLS is frequently the governing
-  constraint (see §10), this one placeholder effectively sets the final pile
-  sizing in those cases.
+  number in the fatigue check** whenever FLS does govern, though with
+  buckling now implemented, FLS is less often the tightest constraint than
+  it used to be (see §10).
 
 Cycle counting assumes one stress cycle per rotor revolution at the average
 of `rpm_min`/`rpm_max`, scaled by a `duty_factor` (default 0.9) — real
@@ -680,20 +750,20 @@ would push `utilization_FLS` well past 1.0 for the same geometry — worth
 revisiting given FLS is already often governing.
 
 **Worked example** (15 MW, 35 m depth, sand φ=35°, `size_monopile` converged
-geometry with `FATIGUE_LOAD_FACTOR = 0.176`: D=9.33 m, t=60.8 mm, L=46.67 m —
-current §10 verification run, reflecting both the 0.176 recalibration and
-the thickness-shrink fix):
+geometry with `FATIGUE_LOAD_FACTOR = 0.3` and the local shell buckling check
+(§8a) both active: D=10.00 m, t=100.91 mm, L=50.00 m — current §10
+verification run; note buckling now governs here (0.961), not FLS):
 
 | Quantity | Value |
 |---|---|
-| `M_char` | 474.7 MN·m |
-| `Z` | 4.082 m³ |
-| `sigma_char` | 116.29 MPa |
-| `delta_sigma_eq` (×0.176) | 20.47 MPa |
-| `N_allow` (S-N curve) | 1.69×10⁸ cycles |
+| `M_char` | 475.6 MN·m |
+| `Z` | 7.689 m³ |
+| `sigma_char` | 61.86 MPa |
+| `delta_sigma_eq` (×0.3) | 18.56 MPa |
+| `N_allow` (S-N curve) | 2.26×10⁸ cycles |
 | `n_cycles` (27 yr life, rpm_avg=6.28, duty=0.9) | 8.03×10⁷ cycles |
-| `damage` | 0.476 |
-| `utilization_FLS` (×DFF=2.0) | 0.952 |
+| `damage` | 0.355 |
+| `utilization_FLS` (×DFF=2.0) | 0.710 |
 
 ---
 
@@ -717,15 +787,17 @@ those two anchors (e.g. 22 MW extrapolates to D0=12.8m, well past the real
 -but-externally-capped 10m reference — see the table in §10).
 
 **Step-wise iteration** (step sizes: `d_step = 0.15 m`, `t_step = 0.002 m`),
-each iteration re-evaluates all four checks and adjusts **one** dimension
+each iteration re-evaluates all five checks and adjusts **one** dimension
 per the following priority:
 1. **NFA failing low** (`f0` below the band) → increase `D` (dominant lever
    for both stiffness and frequency, since `EI ∝ D⁴` and `K_L, K_R` both
    grow strongly with `D`).
-2. **ULS or FLS failing**, and wall thickness is *not* already at the
-   `dt_ratio_min` bound → increase `t`.
-3. **ULS, FLS, or SLS failing**, wall thickness *is* capped → increase `D`
-   (fallback lever once `t` can't grow further).
+2. **ULS, FLS, or Buckling failing**, and wall thickness is *not* already at
+   the `dt_ratio_min` bound → increase `t`. Buckling (added 2026-07-18)
+   behaves like ULS/FLS here — more thickness directly raises its elastic
+   buckling capacity (§8a).
+3. **ULS, FLS, SLS, or Buckling failing**, wall thickness *is* capped →
+   increase `D` (fallback lever once `t` can't grow further).
 4. **NFA failing high** (`f0` above the band, uncommon for monopiles) →
    decrease `D`.
 
@@ -734,9 +806,9 @@ After each adjustment, geometry is clamped to `dt_ratio ∈ [80, 160]` and
 widened from 140 to 160 on 2026-07-16 to match the real D/t optimization
 bound used in the IEA 22 MW reference monopile design (§2).
 
-**Embedded length `L` has no independent design driver.** None of the four
-check-failure branches above (ULS/FLS/SLS/NFA) ever adjust `L` directly —
-only `D` and `t` do. `L` starts at `L0 = 5.0 × D0` (a fixed rule-of-thumb
+**Embedded length `L` has no independent design driver.** None of the five
+check-failure branches above (ULS/FLS/SLS/NFA/Buckling) ever adjust `L`
+directly — only `D` and `t` do. `L` starts at `L0 = 5.0 × D0` (a fixed rule-of-thumb
 ratio, itself only a function of `D0`, not soil or load) and afterward only
 changes as a passive side effect of the `L/D ∈ [3, 8]` clamp reacting to `D`
 changes made for other reasons. There is no check anywhere in this model for
@@ -748,7 +820,7 @@ moment). The `beta×L < 2.5` validity flag (§4) is only a warning that the
 to lengthen the pile. In short: `L` is a derived ratio, not a solved-for
 design variable, in this model.
 
-**Stopping conditions:** all four utilizations ≤ 1.0 (converged), OR
+**Stopping conditions:** all five utilizations ≤ 1.0 (converged), OR
 diameter reaches **3× the initial guess** (runaway guard — appends a
 non-convergence note explaining that a check is likely dominated by an
 input outside pile geometry, e.g. tower stiffness), OR 500 iterations.
@@ -760,7 +832,7 @@ guess already satisfies every check (common whenever ULS/FLS have
 comfortable margin at the D/t midpoint), the loop runs **zero** iterations
 and reports `t0` as "the" answer, regardless of how much thinner a wall
 could also pass. Once the growth loop converges, `size_monopile` now steps
-wall thickness back **down** by `t_step` — re-evaluating all four checks
+wall thickness back **down** by `t_step` — re-evaluating all five checks
 each step — until either a step would fail a check (keep the last passing
 thickness) or the `dt_ratio_max` floor is reached. This finds the true
 minimum-material wall thickness rather than just the first one the growth
@@ -793,37 +865,38 @@ reading any single result from this tool in isolation.
 
 Cases were run against `size_monopile` and `evaluate_monopile` as sanity
 checks (not a unit test suite). Numbers below reflect the current model:
-`FATIGUE_LOAD_FACTOR = 0.176` (§8), the post-convergence thickness-shrink
-step (§9), the two-segment cantilever + degenerate-gap NFA fallback (§7),
-and the corrected `_initial_geometry` diameter anchors (§9) — see
-`methodology.md`. `test_engine.py` at the repo root reproduces all of these
-as runnable checks. Verification is limited to the three turbine sizes with
-a **real reference monopile design** to compare against (5/15/22 MW); a
-20 MW row (interpolated turbine, no real design) and an 8 MW/clay synthetic
-edge-case were removed 2026-07-17 for lacking that comparison — see
-`methodology.md` for what those cases had been checking.
+`FATIGUE_LOAD_FACTOR = 0.3` (§8), the local shell buckling check (§8a,
+added 2026-07-18), the post-convergence thickness-shrink step (§9), the
+two-segment cantilever + degenerate-gap NFA fallback (§7), and the
+corrected `_initial_geometry` diameter anchors (§9) — see `methodology.md`.
+`test_engine.py` at the repo root reproduces all of these as runnable
+checks. Verification is limited to the three turbine sizes with a **real
+reference monopile design** to compare against (5/15/22 MW); a 20 MW row
+(interpolated turbine, no real design) and an 8 MW/clay synthetic edge-case
+were removed 2026-07-17 for lacking that comparison — see `methodology.md`
+for what those cases had been checking.
 
 | Case | Result | Governing check | Notes |
 |---|---|---|---|
-| 5 MW, 20 m depth, sand (φ=36°) | D=6.00 m, t=37.5 mm, L=30.0 m (L/D=5.0, D/t=160) | **NFA** (margin 0.043) | Diameter matches the real OC3 monopile (6 m) exactly (it's now literally one of `_initial_geometry`'s two anchor points); thickness well below the real 60 mm |
-| 15 MW, 35 m depth, sand (φ=35°) | D=10.00 m, t=62.5 mm, L=50.0 m (L/D=5.0, D/t=160) | **NFA** (margin 0.196) | Diameter now matches the real IEA 15 MW reference (10 m) exactly, for the same reason. FLS no longer governs here (0.583, was 0.952 before the anchor fix) — see the note below |
-| 22 MW, 34 m depth, sand (φ=36°) | D=12.80 m, t=80.0 mm, L=64.0 m (L/D=5.0, D/t=160) | **NFA** (margin 0.260) | Real IEA 22 MW design caps diameter at 10 m (an explicit optimizer bound not replicated here); this tool's diameter grows past that cap, same as before the anchor fix |
+| 5 MW, 20 m depth, sand (φ=36°) | D=6.00 m, t=54.5 mm, L=30.0 m (L/D=5.0, D/t=110.1) | **FLS** (margin 0.036) | Diameter matches the real OC3 monopile (6 m) exactly; thickness now much closer to the real 60 mm (was 37.5 mm before buckling was added) |
+| 15 MW, 35 m depth, sand (φ=35°) | D=10.00 m, t=100.9 mm, L=50.0 m (L/D=5.0, D/t=99.1) | **Buckling** (margin 0.039) | Diameter matches the real IEA 15 MW reference (10 m) exactly; D/t≈99 essentially matches the 5/22 MW pattern below — see the note on the Fig. 4-2 estimate in §11 |
+| 22 MW, 34 m depth, sand (φ=36°) | D=12.80 m, t=110.4 mm, L=64.0 m (L/D=5.0, D/t=115.9) | **Buckling** (margin 0.016) | Real IEA 22 MW design caps diameter at 10 m (an explicit optimizer bound not replicated here); at the *real* reference geometry (D=10m, t=100mm) buckling utilization comes out to 1.012 — within 2% of governing exactly, a strong independent check on the method |
 
-**Every case above now sits at exactly `D/t = 160`** — the configured
-`dt_ratio_max` ceiling, not a value derived from any check this model
-evaluates. Before the 2026-07-17 `_initial_geometry` fix (see §9), 15 MW
-was the one case where FLS happened to bind before reaching that ceiling
-(utilization 0.952, governing). Correcting the diameter anchors moved 15 MW
-to the same larger, more-real diameter as the other real-turbine cases —
-which also means less bending stress, so FLS no longer binds there either
-(0.583). **All three real-turbine verification cases now hit the same
-artificial thickness floor, governed by NFA with no other check close
-behind.** This sharpens rather than resolves the missing-buckling-check gap
-(§5/§11 item 18): the empirical comparison against real reference designs
-(5 MW needs ~60mm/D-t=100, 22 MW needs ~100mm/D-t=100, both roughly 1.4-1.6x
-this tool's output — see the sensitivity analysis referenced in
-`methodology.md`) now applies uniformly across every verified case, not
-just two of them.
+**Local shell buckling now governs (or nearly governs) all three
+verification cases**, resolving what §11 item 18 used to flag as an open
+gap. Before this check existed, every case here sat at exactly `D/t=160` —
+the configured `dt_ratio_max` ceiling, not a value derived from any check
+this model evaluated — because none of ULS/SLS/NFA/FLS were tight enough to
+stop the post-convergence shrink phase first. Adding buckling (§8a) raised
+converged wall thickness substantially across every case: 5 MW from 37.5mm
+to 54.5mm, 15 MW from 62.5mm to 100.9mm, 22 MW from 80.0mm to 110.4mm. The
+5 MW and 22 MW results now land close to their real references (54.5mm vs.
+60mm real; 110.4mm vs. 100mm real) — a large improvement over the
+pre-buckling gap. 15 MW's own converged design (D/t≈99) now closely matches
+the D/t≈100 pattern the other two real, sourced references share — which is
+itself evidence that the Fig. 4-2 image-derived ~50mm estimate for 15 MW
+(§2, D/t≈200) was likely a misread of the chart rather than a real ~50mm
+mudline thickness; see §11's note on this.
 
 Two bugs were found and fixed during verification, both while testing the
 newly-sourced 5 MW/OC3 and 22 MW/IEA turbines (§2) against their *real*
@@ -869,6 +942,15 @@ ever been checked against 15/20 MW:
    (6.0m at 5MW / 10.0m at 15MW). **Result:** 15 MW's diameter now lands at
    exactly 10.0m — the real IEA reference value — since it's now literally
    one of the two anchor points.
+4. **Local shell buckling implemented** (2026-07-18): every case above had
+   been converging to the artificial `D/t=160` ceiling with NFA the only
+   check remotely close to binding — direct evidence something outside the
+   four implemented checks was missing (see item 3's finding and the
+   5/22 MW real-design comparison, §5). Implementing DNV-RP-C202 local
+   shell buckling (§8a) and wiring it into `size_monopile`'s growth and
+   shrink phases raised converged thickness substantially across all three
+   cases and made buckling the governing (or near-governing) check for
+   15/22 MW — see the updated table above.
 
 Both original bugs were caught because `size_monopile` failed to converge
 and flagged it rather than silently returning a plausible-looking wrong
@@ -878,11 +960,10 @@ sourced reference geometry (5/22 MW), but **the NFA check as a whole is
 explicitly not yet considered verified** by the user (2026-07-16) pending
 further review — separate from whether its frequency prediction matches
 published values, open questions remain about whether it's the right check
-to be governing designs at all. This matters more than ever now: every
-verified case sits at the same artificial `D/t=160` floor with NFA as the
-only check anywhere close to binding (see the table above) — any future
-correction to NFA is now the single biggest lever on every converged
-design in this report. The 25 MW extrapolated turbine entry (§2) remains
+to be governing designs at all. NFA now has more margin than before in all
+three cases (buckling and FLS have taken over as the tighter constraints),
+which reduces — but doesn't eliminate — how much a future NFA correction
+could move these results. The 25 MW extrapolated turbine entry (§2) remains
 unverified for a separate reason, since it isn't a real reference turbine.
 
 ---
@@ -907,20 +988,23 @@ early screening:
 11. RNA/tower mass split assumed 50/50 of total turbine mass (updated 2026-07-16 from a 40/60 guess) — real observed range is 43.6%–54.2% across the four sourced turbines.
 12. Rayleigh effective-mass factor of 0.25 for the tower's tip-mass contribution.
 13. Natural-frequency model omits the `K_LM` foundation cross-coupling term. The band-inversion bug for wide-rotor-speed-range turbines (e.g. 22 MW) was found and fixed 2026-07-16 with a documented fallback (§7) — checked against real f0 values at 5/22 MW (sourced reference geometries); the 15 MW comparison is informational only (estimated reference thickness, not a table value); the 25 MW extrapolated entry is unverified.
-14. Fatigue `FATIGUE_LOAD_FACTOR = 0.176` (ratio of fatigue-driving stress range to extreme characteristic stress) — revised 2026-07-16, chosen via a sensitivity sweep (excluding NFA from the target) to put the 15 MW reference case's true-minimum wall thickness at ≈60 mm, close to the real IEA 15 MW reference (~55 mm); still an ad-hoc placeholder pending recalibration against real turbine fatigue load data, and the single most influential unvalidated FLS number.
+14. Fatigue `FATIGUE_LOAD_FACTOR = 0.3` (ratio of fatigue-driving stress range to extreme characteristic stress) — revised 2026-07-18, now that the local shell buckling check (§8a) makes 5/15/22 MW converge to buckling-governed geometries where FLS isn't binding. Solving for the FLF that makes FLS=1.0 exactly at each of those three geometries gives 0.282/0.336/0.547 (average 0.389); set instead to a rounder 0.3 as a deliberately conservative concept-design choice — higher than the pre-buckling value of 0.176, but not uniformly conservative across all three cases (below both the 15 MW and 22 MW individual fits). Still an ad-hoc placeholder pending recalibration against real turbine fatigue load data, and the single most influential unvalidated FLS number.
 15. Fatigue cycle count uses one cycle per rotor revolution at the min/max rpm average, not a wind-speed distribution.
 16. Single DNV-RP-C203-style S-N curve (`log10(a)=12.16`, `m=3`) applied structure-wide, not joint-specific.
 17. `USD_PER_T_STEEL = 2200` — a placeholder, not sourced from a specific quote.
-18. **No buckling check anywhere** — `_uls_check` is yield-only (von Mises vs. `STEEL_YIELD_MPA/GAMMA_M_ULS`); no local shell buckling or global Euler buckling is evaluated. Investigated 2026-07-17 (see §5): global buckling is very unlikely to govern (axial load tiny vs. elastic critical load); local shell buckling utilization is ≈1.07 at a realistic 10 m section length, close to governing but not decisively — deliberately not implemented at concept stage, since wall thickness here is a single constant value and a real design would taper it, making detailed buckling optimization now premature.
+18. **Local shell buckling implemented 2026-07-18** (`_shell_buckling_check`, §8a) — DNV-RP-C202 unstiffened cylinder, panel length assumed equal to the full exposed above-mudline shaft (no ring stiffeners). This is now often the governing check (5/15/22 MW all converge buckling-governed or near it). **Global (Euler) column buckling remains unimplemented** — investigated 2026-07-17, found very unlikely to govern (axial load tiny vs. elastic critical load).
 19. `sigma_vm` in `_uls_check` omits axial stress (self-weight/pretension) and hoop/radial stress (external hydrostatic pressure) — only bending + shear are combined (§5).
 20. The post-convergence thickness-shrink step (§9, added 2026-07-16) only shrinks wall thickness, not diameter — a design could still be carrying more diameter than strictly necessary if diameter, not thickness, is what's over-conservative for a given case. NFA is explicitly excluded from driving any shrink, pending its own verification (see §10).
 21. **Embedded length `L` has no independent design driver** — it's a fixed `L/D=5` rule-of-thumb ratio at the initial guess, only ever changing as a passive side effect of the `L/D∈[3,8]` clamp when `D` changes for other reasons. No check evaluates ultimate lateral/moment soil capacity (e.g. Broms' method) to actually size embedment against load; `beta×L<2.5` (§4) is only a stiffness-formula validity warning, not a corrective design action (§9).
-22. **For most turbine sizes, the growth loop runs zero iterations** — `_initial_geometry`'s starting guess already satisfies ULS/SLS/NFA/FLS, so `D` (and therefore `L`, via the fixed `L/D=5` ratio) never moves from the initial guess at all. Combined with items 20/21, a result can look like a converged, optimized design while actually being almost entirely the raw starting guess plus the `dt_ratio_max` thickness ceiling (§9/§10).
+22. **For most turbine sizes, the growth loop runs zero iterations** — `_initial_geometry`'s starting guess already satisfies ULS/SLS/NFA/FLS, so `D` (and therefore `L`, via the fixed `L/D=5` ratio) never moves from the initial guess at all. Combined with items 20/21, a result can look like a converged, optimized design while actually being almost entirely the raw starting guess plus the `dt_ratio_max` thickness ceiling (§9/§10) -- though with buckling now implemented (item 18), that ceiling is reached less often than before.
+23. **The 15 MW Fig. 4-2 mudline thickness estimate (~50mm, §2) is now doubted** (2026-07-18) — this engine's own buckling-inclusive converged 15 MW design lands at D/t≈99, matching the 5MW/22MW sourced references' D/t≈100 pattern almost exactly, while the Fig. 4-2 estimate implies D/t≈200 (much thinner). Likely a chart misread rather than a real ~50mm mudline value; not corrected in §2 pending a table-sourced number.
 
 Items 6–13 (soil and natural-frequency modeling) are the ones most likely to
 materially shift results if refined with real project data — see §4/§7 and
-the bugs described in §10. **Item 18 (no buckling check) is a structural gap,
-not just an unvalidated number** — it means a converged design could be
-unsafe in a way none of the four implemented checks would catch. **NFA's own
-verification status (§10) is now higher-stakes than before item 14's fix**,
-since several converged designs sit within a hair of their NFA limit.
+the bugs described in §10. **Global (Euler) column buckling remains
+unimplemented** (item 18) — investigated and found very unlikely to govern,
+so this is a lower-priority gap than local shell buckling was. **NFA's own
+verification status (§10) still matters**, but less urgently than before
+local buckling was added (item 18) — buckling and FLS now carry more of the
+governing load across the three verified cases, leaving NFA with more
+margin than it had previously.

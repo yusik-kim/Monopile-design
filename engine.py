@@ -3,8 +3,8 @@ Monopile Foundation Concept Design Engine v0.1
 
 Implements an Arany-et-al.-style ("10-step") initial sizing loop for offshore
 wind monopile foundations: iterate ULS -> SLS -> natural-frequency (soft-stiff)
--> FLS using closed-form formulas until a candidate diameter/wall-thickness/
-embedded-length converges.
+-> FLS -> local shell buckling using closed-form formulas until a candidate
+diameter/wall-thickness/embedded-length converges.
 
 Concept-level screening only. Not certification or FEED design.
 
@@ -20,6 +20,10 @@ Key simplifications (all concept-stage, not detailed/FEED-grade):
   Arany's full 3-spring model includes.
 - Fatigue: single equivalent-stress-range Palmgren-Miner check, not a full
   rainflow-counted multi-bin DLC fatigue simulation.
+- Local shell buckling (added 2026-07-18): DNV-RP-C202 unstiffened-cylinder
+  check, using a single panel length equal to the exposed (above-mudline)
+  shaft length -- i.e. assuming no ring stiffeners anywhere on the pile. See
+  _shell_buckling_check for why, and for what this replaced.
 Each simplification is called out at its function. Treat outputs as a
 starting point for detailed design / PISA-based or FE validation, not a
 substitute for it -- see docs/Monopile_Initial_Design_Method_Summary.md.
@@ -38,6 +42,7 @@ G = 9.81
 RHO_SEAWATER_KG_M3 = 1025.0
 STEEL_DENSITY_T_PER_M3 = 7.85
 STEEL_E_MPA = 210_000.0          # Young's modulus (MPa = MN/m^2)
+STEEL_POISSON_RATIO = 0.3        # used only by the shell buckling check
 STEEL_YIELD_MPA = 355.0          # S355 offshore structural steel
 USD_PER_T_STEEL = 2200.0         # rolled/welded monopile steel, concept-stage
 
@@ -51,11 +56,18 @@ SN_M = 3.0
 FATIGUE_DESIGN_FACTOR = 2.0       # DNV DFF for typical (non-critical/inspectable) monopile joints
 
 # Ratio of the fatigue-equivalent stress range to the characteristic (extreme)
-# bending stress. Ad-hoc value back-calculated to match the published IEA
-# 15MW reference monopile wall thickness (~40-55mm at D=10m) -- see
-# docs/methodology.md (2026-07-16). NOT derived from a real DLC/rainflow
-# spectrum; recalibrate once the model has real turbine fatigue load data.
-FATIGUE_LOAD_FACTOR = 0.176
+# bending stress. Revised 2026-07-18, now that the local shell buckling check
+# below is implemented: at the buckling-governed geometries this produces for
+# 5/15/22 MW, FLS is not the binding check, so solving for the FLF that makes
+# FLS=1.0 exactly at each of those three geometries gives 0.282 (5MW), 0.336
+# (15MW), 0.547 (22MW) -- average 0.389. Set instead to a rounder, still
+# ad-hoc 0.3 as a deliberately conservative concept-design choice: higher
+# than the pre-buckling value of 0.176, though it is NOT uniformly
+# conservative across all three cases -- it sits below both the 15MW and
+# 22MW individual fits and below the three-case average. Still not derived
+# from a real DLC/rainflow spectrum; recalibrate once the model has real
+# turbine fatigue load data. See docs/methodology.md (2026-07-18).
+FATIGUE_LOAD_FACTOR = 0.3
 
 # Reference turbines: mass_t is total turbine mass (RNA + tower); thrust_mn is
 # the extreme/ultimate design rotor thrust used directly as the ULS
@@ -160,6 +172,7 @@ class MonopileResult:
     nfa_utilization: float
     fls_damage: float
     fls_utilization: float
+    buckling_utilization: float
     steel_mass_t: float
     steel_cost_usd: float
     margins: dict[str, float]
@@ -462,10 +475,126 @@ def _fls_check(inputs: DesignInputs, geometry: MonopileGeometry, turbine: dict,
 
 
 # ---------------------------------------------------------------------------
+# Local shell buckling (DNV-RP-C202, unstiffened cylinder)
+# ---------------------------------------------------------------------------
+def _axial_load_estimate(inputs: DesignInputs, geometry: MonopileGeometry, turbine: dict) -> float:
+    """Rough self-weight estimate (RNA + tower mass, from TURBINE_LIBRARY,
+    plus the pile's own steel weight above mudline), used only by the shell
+    buckling check below. ULS/SLS/FLS don't need this -- they only combine
+    the extreme lateral load's bending and shear, per their own docstrings.
+    """
+    d = geometry.diameter_m
+    t = geometry.wall_thickness_m
+    d_inner = d - 2 * t
+    area_m2 = (math.pi / 4) * (d ** 2 - d_inner ** 2)
+    pile_self_weight_t = area_m2 * inputs.water_depth_m * STEEL_DENSITY_T_PER_M3
+    total_weight_t = turbine["mass_t"] + pile_self_weight_t
+    return total_weight_t * G / 1000.0  # MN
+
+
+def _shell_buckling_coefficients(z_batdorf: float, r_m: float, t_m: float) -> tuple[float, float, float]:
+    """C coefficients (psi, xi, rho -> C) for an unstiffened cylindrical
+    shell under axial/bending, torsion/shear, and lateral (hoop, external
+    pressure) buckling -- DNV-RP-C202 Section 3.4, Table 3-2. Cross-checked
+    against WISDEM's open-source DNV-RP-C202 implementation
+    (wisdem/commonse/utilization_dnvgl.py, CylinderBuckling class).
+    """
+    def _c(psi: float, xi: float, rho: float) -> float:
+        return psi * math.sqrt(1 + (rho * xi / psi) ** 2)
+
+    c_axial_bending = _c(1.0, 0.702 * z_batdorf, 0.5 * (1 + r_m / (150 * t_m)) ** -0.5)
+    c_torsion = _c(5.34, 0.856 * z_batdorf ** 0.75, 0.6)
+    c_lateral = _c(4.0, 1.04 * math.sqrt(z_batdorf), 0.6)
+    return c_axial_bending, c_torsion, c_lateral
+
+
+def _shell_buckling_check(geometry: MonopileGeometry, l_panel_m: float, m_char_mnm: float,
+                           v_char_mn: float, water_depth_m: float, axial_load_mn: float) -> float:
+    """DNV-RP-C202 local shell buckling check for an unstiffened cylindrical
+    shell -- the thin wall itself rippling under compressive stress, well
+    before the material yields (a different failure mode from ULS's yield
+    check). Combines axial+bending, hoop (external hydrostatic pressure),
+    and shear stress against their own elastic buckling capacities, then
+    reduces by a slenderness-dependent material factor.
+
+    l_panel_m ("the panel length"): the spacing between ring stiffeners --
+    NOT can-to-can fabrication weld seams, which don't provide the same
+    restraint against the buckling mode a dedicated stiffening ring does.
+    This model assumes NO ring stiffeners anywhere on the pile (consistent
+    with how large modern monopiles are typically detailed -- thickness is
+    varied can-by-can instead), so l_panel_m is the full unsupported
+    above-mudline shaft length (water depth + freeboard to the transition
+    piece); the embedded portion is excluded since soil continuously
+    restrains it. See docs/METHODOLOGY_REPORT.md Section 5 for the
+    sensitivity analysis behind this choice, and Section 11 item 18 for
+    where this replaced "not implemented."
+
+    Before this check existed (through 2026-07-17), size_monopile's 15 MW
+    case converged to t~=50mm without ever evaluating buckling -- ULS, SLS,
+    NFA, and FLS all had comfortable margin at that thickness, so nothing
+    caught that an unstiffened wall this thin, at this pile's proportions,
+    fails shell buckling by roughly 2x. Adding this check raises the
+    converged wall thickness substantially across every turbine size.
+    """
+    d = geometry.diameter_m
+    t = geometry.wall_thickness_m
+    r = d / 2
+    d_inner = d - 2 * t
+    area_m2 = (math.pi / 4) * (d ** 2 - d_inner ** 2)
+    i_second_moment = (math.pi / 64) * (d ** 4 - d_inner ** 4)
+    section_modulus_m3 = i_second_moment / r
+
+    m_uls_mnm = GAMMA_F_ULS * m_char_mnm
+    v_uls_mn = GAMMA_F_ULS * v_char_mn
+    sigma_bending_mpa = m_uls_mnm / section_modulus_m3
+    sigma_axial_mpa = axial_load_mn / area_m2
+    tau_shear_mpa = v_uls_mn / (0.5 * area_m2)
+
+    p_mpa = (RHO_SEAWATER_KG_M3 * G * water_depth_m) / 1e6
+    sigma_hoop_mpa = p_mpa * r / t
+
+    nu = STEEL_POISSON_RATIO
+    z_batdorf = (l_panel_m ** 2 / (r * t)) * math.sqrt(1 - nu ** 2)
+    c_axial_bending, c_torsion, c_lateral = _shell_buckling_coefficients(z_batdorf, r, t)
+
+    def _f_elastic(c: float) -> float:
+        return (c * math.pi ** 2 * STEEL_E_MPA) / (12 * (1 - nu ** 2)) * (t / l_panel_m) ** 2
+
+    fea = _f_elastic(c_axial_bending)   # axial/bending elastic buckling capacity
+    fet = _f_elastic(c_torsion)         # shear elastic buckling capacity
+    feh = _f_elastic(c_lateral)         # hoop elastic buckling capacity
+
+    # DNV convention: only the compressive part of each stress counts.
+    axial_compressive_mpa = abs(min(-(sigma_axial_mpa + sigma_bending_mpa), 0.0))
+    hoop_compressive_mpa = abs(min(-sigma_hoop_mpa, 0.0))
+    shear_mpa = abs(tau_shear_mpa)
+
+    sigma_vm_mpa = math.sqrt(
+        ((axial_compressive_mpa + hoop_compressive_mpa) / 2) ** 2
+        + 3 * (((axial_compressive_mpa - hoop_compressive_mpa) / 2) ** 2 + shear_mpa ** 2)
+    )
+
+    lambda_s = math.sqrt(
+        (STEEL_YIELD_MPA / sigma_vm_mpa)
+        * (axial_compressive_mpa / fea + shear_mpa / fet + hoop_compressive_mpa / feh)
+    )
+    if lambda_s < 0.5:
+        gamma_m = 1.15
+    elif lambda_s >= 1.0:
+        gamma_m = 1.45
+    else:
+        gamma_m = 0.85 + 0.6 * lambda_s
+
+    fks_mpa = STEEL_YIELD_MPA / math.sqrt(1 + lambda_s ** 4)
+    fksd_mpa = fks_mpa / gamma_m
+    return sigma_vm_mpa / fksd_mpa
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
-def _constraint_margins(uls: float, sls: float, nfa: float, fls: float) -> dict[str, float]:
-    return {"ULS": 1.0 - uls, "SLS": 1.0 - sls, "NFA": 1.0 - nfa, "FLS": 1.0 - fls}
+def _constraint_margins(uls: float, sls: float, nfa: float, fls: float, buckling: float) -> dict[str, float]:
+    return {"ULS": 1.0 - uls, "SLS": 1.0 - sls, "NFA": 1.0 - nfa, "FLS": 1.0 - fls, "Buckling": 1.0 - buckling}
 
 
 def most_restrictive_constraint(margins: dict[str, float]) -> tuple[str, float]:
@@ -487,7 +616,13 @@ def evaluate_monopile(inputs: DesignInputs, geometry: MonopileGeometry) -> Monop
     f0_hz, band, nfa_utilization, nfa_notes = _natural_frequency(inputs, geometry, turbine, k_lateral, k_rocking)
     fls_damage, fls_utilization = _fls_check(inputs, geometry, turbine, m_mudline_mnm)
 
-    margins = _constraint_margins(uls_utilization, sls_utilization, nfa_utilization, fls_utilization)
+    l_panel_m = inputs.water_depth_m + turbine["transition_piece_height_m"]
+    axial_load_mn = _axial_load_estimate(inputs, geometry, turbine)
+    buckling_utilization = _shell_buckling_check(
+        geometry, l_panel_m, m_mudline_mnm, v_mudline_mn, inputs.water_depth_m, axial_load_mn
+    )
+
+    margins = _constraint_margins(uls_utilization, sls_utilization, nfa_utilization, fls_utilization, buckling_utilization)
     governing, _ = most_restrictive_constraint(margins)
 
     d = geometry.diameter_m
@@ -520,6 +655,7 @@ def evaluate_monopile(inputs: DesignInputs, geometry: MonopileGeometry) -> Monop
         nfa_utilization=nfa_utilization,
         fls_damage=fls_damage,
         fls_utilization=fls_utilization,
+        buckling_utilization=buckling_utilization,
         steel_mass_t=steel_mass_t,
         steel_cost_usd=steel_mass_t * USD_PER_T_STEEL,
         margins=margins,
@@ -552,15 +688,17 @@ def _initial_geometry(inputs: DesignInputs, turbine: dict) -> MonopileGeometry:
 
 def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileResult:
     """Arany-style step-wise iteration, adjusting whichever dimension is most
-    effective for the worst-failing check, until all four utilizations are
+    effective for the worst-failing check, until all five utilizations are
     <= 1.0 (or max_iterations is reached):
 
     - NFA failing low (too soft): increase diameter first -- D is the
       dominant lever for both foundation stiffness and frequency (it raises
       EI ~D^4 and K_L/K_R), more effective than embedded length.
-    - ULS/FLS failing: increase wall thickness, unless thickness is already
-      capped at dt_ratio_min (thickest allowed wall), in which case fall
-      back to increasing diameter.
+    - ULS/FLS/Buckling failing: increase wall thickness, unless thickness is
+      already capped at dt_ratio_min (thickest allowed wall), in which case
+      fall back to increasing diameter. Buckling (added 2026-07-18) behaves
+      like ULS/FLS here -- more wall thickness directly increases its
+      elastic buckling capacity (see _shell_buckling_check).
     - SLS failing: increase diameter (stiffens the foundation, reduces
       mudline rotation).
     - NFA failing high (too stiff, uncommon for monopiles): reduce diameter.
@@ -595,6 +733,7 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
             "SLS": result.sls_utilization,
             "NFA": result.nfa_utilization,
             "FLS": result.fls_utilization,
+            "Buckling": result.buckling_utilization,
         }
         if all(u <= 1.0 for u in checks.values()):
             converged = True
@@ -609,9 +748,9 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
 
         if nfa_too_soft:
             geometry = MonopileGeometry(geometry.diameter_m + d_step_m, geometry.wall_thickness_m, geometry.embedded_length_m)
-        elif (checks["ULS"] > 1.0 or checks["FLS"] > 1.0) and not t_capped:
+        elif (checks["ULS"] > 1.0 or checks["FLS"] > 1.0 or checks["Buckling"] > 1.0) and not t_capped:
             geometry = MonopileGeometry(geometry.diameter_m, geometry.wall_thickness_m + t_step_m, geometry.embedded_length_m)
-        elif checks["ULS"] > 1.0 or checks["FLS"] > 1.0 or checks["SLS"] > 1.0:
+        elif checks["ULS"] > 1.0 or checks["FLS"] > 1.0 or checks["SLS"] > 1.0 or checks["Buckling"] > 1.0:
             geometry = MonopileGeometry(geometry.diameter_m + d_step_m, geometry.wall_thickness_m, geometry.embedded_length_m)
         elif checks["NFA"] > 1.0:
             geometry = MonopileGeometry(max(geometry.diameter_m - d_step_m, 0.1), geometry.wall_thickness_m, geometry.embedded_length_m)
@@ -642,6 +781,7 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
                 thinner_result.sls_utilization,
                 thinner_result.nfa_utilization,
                 thinner_result.fls_utilization,
+                thinner_result.buckling_utilization,
             )
             if all(u <= 1.0 for u in thinner_checks):
                 geometry, result = thinner_geometry, thinner_result
@@ -651,7 +791,7 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
     if not converged:
         result.notes.append(
             "size_monopile did not converge: increasing diameter/thickness/length "
-            "within the configured bounds did not clear all four checks. This "
+            "within the configured bounds did not clear all five checks. This "
             "usually means a check is dominated by an input outside the pile "
             "geometry (e.g. tower stiffness for NFA) -- review DesignInputs "
             "rather than relaxing the D/t or L/D bounds."
