@@ -115,8 +115,8 @@ def monopile_schematic_svg(geometry, water_depth_m: float, d_over_t: float) -> s
 
 st.title("Monopile Concept Design")
 st.caption(
-    "Arany-et-al.-style concept-stage sizing (ULS/SLS/NFA/FLS iteration). "
-    "Concept-level screening only -- not certification or FEED design."
+    "Arany-et-al.-style concept-stage sizing (ULS/SLS/NFA/FLS/local buckling "
+    "iteration). Concept-level screening only -- not certification or FEED design."
 )
 
 with st.sidebar:
@@ -205,12 +205,13 @@ else:
     )
 
 st.subheader("Utilization (pass if <= 1.0)")
-u1, u2, u3, u4 = st.columns(4)
+u1, u2, u3, u4, u5 = st.columns(5)
 for col, label, value in [
     (u1, "ULS", result.uls_utilization),
     (u2, "SLS", result.sls_utilization),
     (u3, "NFA", result.nfa_utilization),
     (u4, "FLS", result.fls_utilization),
+    (u5, "Local Buckling", result.buckling_utilization),
 ]:
     with col:
         st.progress(min(1.0, value), text=f"{label}: {value:.2f}")
