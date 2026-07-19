@@ -56,18 +56,24 @@ SN_M = 3.0
 FATIGUE_DESIGN_FACTOR = 2.0       # DNV DFF for typical (non-critical/inspectable) monopile joints
 
 # Ratio of the fatigue-equivalent stress range to the characteristic (extreme)
-# bending stress. Revised 2026-07-18, now that the local shell buckling check
-# below is implemented: at the buckling-governed geometries this produces for
-# 5/15/22 MW, FLS is not the binding check, so solving for the FLF that makes
-# FLS=1.0 exactly at each of those three geometries gives 0.282 (5MW), 0.336
-# (15MW), 0.547 (22MW) -- average 0.389. Set instead to a rounder, still
-# ad-hoc 0.3 as a deliberately conservative concept-design choice: higher
-# than the pre-buckling value of 0.176, though it is NOT uniformly
-# conservative across all three cases -- it sits below both the 15MW and
-# 22MW individual fits and below the three-case average. Still not derived
-# from a real DLC/rainflow spectrum; recalibrate once the model has real
-# turbine fatigue load data. See docs/methodology.md (2026-07-18).
-FATIGUE_LOAD_FACTOR = 0.3
+# bending stress. Revised again 2026-07-18: with the local shell buckling
+# check below now active in size_monopile, a sensitivity sweep of FLF from
+# 0.25 to 0.60 (step 0.05) against 5/15/22 MW showed the FLS-vs-Buckling
+# crossover point itself scales with turbine size (~0.30 for 5MW, ~0.35 for
+# 15MW, ~0.55 for 22MW) -- there is no single FLF that makes FLS govern
+# uniformly across all three. 0.35 was chosen empirically as the value where:
+# (a) FLS governs both 5MW and 15MW (t=64.5mm, 106.9mm), matching the
+#     industry expectation that fatigue drives monopile sizing below ~15MW;
+# (b) 22MW remains buckling-governed (t=110.4mm) -- treated as consistent
+#     with (a) rather than contradicting it, since large turbines are
+#     expected to behave differently;
+# (c) resulting thicknesses land close to the real reference designs once
+#     buckling is included: 64.5mm vs. the real OC3 5MW's 60mm, and 110.4mm
+#     vs. the real IEA 22MW's 100mm -- both within ~10%.
+# Still ad-hoc and not derived from a real DLC/rainflow spectrum; recalibrate
+# once the model has real turbine fatigue load data. See docs/methodology.md
+# (2026-07-18) for the full sensitivity sweep table.
+FATIGUE_LOAD_FACTOR = 0.35
 
 # Reference turbines: mass_t is total turbine mass (RNA + tower); thrust_mn is
 # the extreme/ultimate design rotor thrust used directly as the ULS
