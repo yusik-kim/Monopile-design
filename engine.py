@@ -146,7 +146,7 @@ class DesignInputs:
     dt_ratio_min: float = 80.0
     dt_ratio_max: float = 160.0
     l_over_d_min: float = 3.0
-    l_over_d_max: float = 8.0
+    l_over_d_max: float = 12.0
     # Simplified tower geometry, approximated from hub height when not given.
     # Concept-stage placeholder -- refine with actual tower design.
     avg_tower_diameter_m: float | None = None
@@ -675,8 +675,8 @@ def _initial_geometry(inputs: DesignInputs, turbine: dict) -> MonopileGeometry:
     """Rule-of-thumb starting guess, refined by the iteration loop below.
     Diameter regressed against two real reference-monopile anchor points
     (6.0 m at 5 MW -- OC3/NREL; 10.0 m at 15 MW -- IEA, see TURBINE_LIBRARY
-    sources); embedded length at mid-range L/D=5; wall thickness at
-    mid-range D/t=110.
+    sources); embedded length at a fixed L/D=5 rule-of-thumb ratio (not tied
+    to l_over_d_min/max); wall thickness at mid-range D/t=110.
 
     Fixed 2026-07-17: this previously anchored to 7 m at 8 MW / 11 m at 20 MW,
     leftover from the original six-turbine hand-estimated library (8-20 MW)

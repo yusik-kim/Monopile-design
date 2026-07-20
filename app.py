@@ -130,7 +130,7 @@ with st.sidebar:
     )
 
     st.header("Site")
-    water_depth_m = st.number_input("Water depth [m]", min_value=5.0, max_value=80.0, value=35.0, step=1.0)
+    water_depth_m = st.number_input("Water depth [m]", min_value=5.0, max_value=150.0, value=35.0, step=1.0)
     hs_m = st.number_input("Significant wave height Hs [m]", min_value=0.5, max_value=20.0, value=5.0, step=0.5)
     tp_s = st.number_input("Peak wave period Tp [s]", min_value=3.0, max_value=25.0, value=10.0, step=0.5)
     st.caption("Hs/Tp should be the extreme (e.g. 50-year return period) design sea state, not operational/typical conditions.")
@@ -154,7 +154,7 @@ with st.sidebar:
         dt_ratio_max = st.number_input("Max D/t", min_value=dt_ratio_min, max_value=300.0, value=160.0, step=5.0)
         st.caption("D/t bounds are advisory, not a hard limit: the converged geometry may fall outside them, flagged with a manufacturability warning below rather than being blocked from getting there.")
         l_over_d_min = st.number_input("Min L/D", min_value=1.0, max_value=6.0, value=3.0, step=0.5)
-        l_over_d_max = st.number_input("Max L/D", min_value=l_over_d_min, max_value=12.0, value=8.0, step=0.5)
+        l_over_d_max = st.number_input("Max L/D", min_value=l_over_d_min, max_value=12.0, value=12.0, step=0.5)
 
         override_tower = st.checkbox("Override tower geometry", value=False)
         avg_tower_diameter_m = None

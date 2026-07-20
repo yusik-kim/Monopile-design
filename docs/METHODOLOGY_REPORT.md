@@ -702,7 +702,7 @@ geometry: D=10.00 m, t=106.91 mm, L=50.00 m — see §10; FLS governs here):
 D0 = 6.0 + (10.0 - 6.0) * (turbine_mw - 5.0) / (15.0 - 5.0)   [m]   (linear
      regression between two real reference-monopile diameters:
      6.0m at 5MW/OC3, 10.0m at 15MW/IEA -- see TURBINE_LIBRARY sources, §2)
-L0 = 5.0 * D0            (mid of the allowed L/D range, default 3-8)
+L0 = 5.0 * D0            (fixed rule-of-thumb ratio, not tied to l_over_d_min/max)
 t0 = D0 / 110.0           (mid of the allowed D/t range, default 80-160)
 ```
 An unclamped linear extrapolation for turbine sizes away from the two
@@ -723,7 +723,7 @@ per the following priority:
 4. **NFA failing high** (`f0` above the band, uncommon for monopiles) →
    decrease `D`.
 
-After each adjustment, `L/D` is clamped to `[3, 8]` (configurable in
+After each adjustment, `L/D` is clamped to `[3, 12]` (configurable in
 `DesignInputs`). **`D/t` is *not* clamped** — wall thickness is free to grow
 or shrink past `[dt_ratio_min, dt_ratio_max]` (default `[80, 160]`, matching
 the real D/t bound used in the IEA 22 MW reference monopile design, §2) if
@@ -735,7 +735,7 @@ being silently clamped back to it.
 check-failure branches above ever adjust `L` directly — only `D` and `t` do.
 `L` starts at `L0 = 5.0 × D0` (a fixed rule-of-thumb ratio, itself only a
 function of `D0`) and afterward only changes as a passive side effect of the
-`L/D ∈ [3, 8]` clamp reacting to `D` changes made for other reasons. There is
+`L/D ∈ [3, 12]` clamp reacting to `D` changes made for other reasons. There is
 no check anywhere in this model for what actually governs embedment in real
 design practice — ultimate lateral/moment soil capacity (e.g. Broms' method,
 or a p-y-based capacity check ensuring the pile doesn't rotate out of the
