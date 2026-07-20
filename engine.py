@@ -26,11 +26,9 @@ Key simplifications (all concept-stage, not detailed/FEED-grade):
   _shell_buckling_check for why, and for what this replaced.
 Each simplification is called out at its function. Treat outputs as a
 starting point for detailed design / PISA-based or FE validation, not a
-substitute for it -- see docs/Monopile_Initial_Design_Method_Summary.md.
-
-Note: docs/Monopile_Initial_Design_Method_Summary.md and docs/methodology.md
-(referenced in comments below) are kept local-only and are not part of this
-published repo.
+substitute for it -- see docs/Monopile_Initial_Design_Method_Summary.md and
+docs/METHODOLOGY_REPORT.md for the full equations/constants/assumptions, and
+docs/method_update_log.md for the dated history of how they were chosen.
 """
 from dataclasses import dataclass, field, asdict
 import math
@@ -71,14 +69,14 @@ FATIGUE_DESIGN_FACTOR = 2.0       # DNV DFF for typical (non-critical/inspectabl
 #     buckling is included: 64.5mm vs. the real OC3 5MW's 60mm, and 110.4mm
 #     vs. the real IEA 22MW's 100mm -- both within ~10%.
 # Still ad-hoc and not derived from a real DLC/rainflow spectrum; recalibrate
-# once the model has real turbine fatigue load data. See docs/methodology.md
+# once the model has real turbine fatigue load data. See docs/method_update_log.md
 # (2026-07-18) for the full sensitivity sweep table.
 FATIGUE_LOAD_FACTOR = 0.35
 
 # Reference turbines: mass_t is total turbine mass (RNA + tower); thrust_mn is
 # the extreme/ultimate design rotor thrust used directly as the ULS
 # characteristic wind load. 5/10/15/22 MW entries are sourced directly from
-# published reference-turbine reports (see docs/methodology.md, 2026-07-16);
+# published reference-turbine reports (see docs/method_update_log.md, 2026-07-16);
 # 25 MW is a linear extrapolation of the 15->22 MW trend, NOT independently
 # verified against a real 25 MW reference document.
 #
@@ -381,7 +379,7 @@ def _natural_frequency(inputs: DesignInputs, geometry: MonopileGeometry, turbine
     one uniform "average tower" section over the whole mudline-to-hub span:
     lumping the much stiffer pile-above-mudline length in with the tower's
     average EI was found (2026-07-16) to systematically underpredict f0 --
-    see docs/methodology.md.
+    see docs/method_update_log.md.
     """
     d_avg, t_avg = _tower_geometry(inputs, turbine)
     d_inner = d_avg - 2 * t_avg
@@ -406,7 +404,7 @@ def _natural_frequency(inputs: DesignInputs, geometry: MonopileGeometry, turbine
     k_eq_n_per_m = k_eq_mn_per_m * 1e6
 
     # RNA/tower split of total mass: real reference turbines range from 43.6%
-    # (IEA 22MW) to 54.2% (IEA 15MW) RNA fraction (see docs/methodology.md,
+    # (IEA 22MW) to 54.2% (IEA 15MW) RNA fraction (see docs/method_update_log.md,
     # 2026-07-16); 0.5/0.5 is the average, not a fixed physical ratio.
     total_mass_t = turbine["mass_t"]
     m_rna_t = 0.5 * total_mass_t
@@ -427,7 +425,7 @@ def _natural_frequency(inputs: DesignInputs, geometry: MonopileGeometry, turbine
         # Classical soft-stiff gap (between the top of the 1P band and the
         # bottom of the 3P band) doesn't exist when the rotor-speed range is
         # wide enough that 3*rpm_min < 1.1*rpm_max -- a real trend for very
-        # large turbines (see docs/methodology.md, 2026-07-16). Fall back to
+        # large turbines (see docs/method_update_log.md, 2026-07-16). Fall back to
         # a lower-bound-only criterion (clear 1P at rated), matching e.g. the
         # IEA 22MW reference design's single-sided 0.15 Hz minimum-frequency
         # target; use 3P-at-rated as a loose upper ceiling instead of 3P-at
@@ -700,28 +698,31 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
     - NFA failing low (too soft): increase diameter first -- D is the
       dominant lever for both foundation stiffness and frequency (it raises
       EI ~D^4 and K_L/K_R), more effective than embedded length.
-    - ULS/FLS/Buckling failing: increase wall thickness, unless thickness is
-      already capped at dt_ratio_min (thickest allowed wall), in which case
-      fall back to increasing diameter. Buckling (added 2026-07-18) behaves
+    - ULS/FLS/Buckling failing: increase wall thickness. Buckling behaves
       like ULS/FLS here -- more wall thickness directly increases its
       elastic buckling capacity (see _shell_buckling_check).
     - SLS failing: increase diameter (stiffens the foundation, reduces
       mudline rotation).
     - NFA failing high (too stiff, uncommon for monopiles): reduce diameter.
+
+    dt_ratio_min/max are advisory, not a hard search bound (see docs/
+    method_update_log.md): wall thickness is free to grow or shrink past
+    them if that's what the physics checks demand, and the final geometry
+    is flagged with a manufacturability warning note if it ends up outside
+    that range -- rather than the search silently clamping thickness back
+    to the boundary, which was found to distort results (converged geometries
+    landing exactly at dt_ratio_max regardless of what the checks needed).
+    L/D bounds are still a hard clamp.
     """
     turbine = turbine_from_capacity(inputs.turbine_mw)
     geometry = _initial_geometry(inputs, turbine)
 
     d_step_m = 0.15
     t_step_m = 0.002
+    t_floor_m = 0.001  # absolute sanity floor, not tied to dt_ratio_max
 
     def _clamped(geom: MonopileGeometry) -> MonopileGeometry:
         d, t, l = geom.diameter_m, geom.wall_thickness_m, geom.embedded_length_m
-        dt_ratio = d / t
-        if dt_ratio < inputs.dt_ratio_min:
-            t = d / inputs.dt_ratio_min
-        elif dt_ratio > inputs.dt_ratio_max:
-            t = d / inputs.dt_ratio_max
         l_over_d = l / d
         if l_over_d < inputs.l_over_d_min:
             l = inputs.l_over_d_min * d
@@ -748,15 +749,13 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
         if geometry.diameter_m >= d_runaway_cap_m:
             break
 
-        dt_ratio = geometry.diameter_m / geometry.wall_thickness_m
-        t_capped = dt_ratio <= inputs.dt_ratio_min + 1e-9
         nfa_too_soft = checks["NFA"] > 1.0 and result.natural_frequency_hz < result.soft_stiff_band_hz[0]
 
         if nfa_too_soft:
             geometry = MonopileGeometry(geometry.diameter_m + d_step_m, geometry.wall_thickness_m, geometry.embedded_length_m)
-        elif (checks["ULS"] > 1.0 or checks["FLS"] > 1.0 or checks["Buckling"] > 1.0) and not t_capped:
+        elif checks["ULS"] > 1.0 or checks["FLS"] > 1.0 or checks["Buckling"] > 1.0:
             geometry = MonopileGeometry(geometry.diameter_m, geometry.wall_thickness_m + t_step_m, geometry.embedded_length_m)
-        elif checks["ULS"] > 1.0 or checks["FLS"] > 1.0 or checks["SLS"] > 1.0 or checks["Buckling"] > 1.0:
+        elif checks["SLS"] > 1.0:
             geometry = MonopileGeometry(geometry.diameter_m + d_step_m, geometry.wall_thickness_m, geometry.embedded_length_m)
         elif checks["NFA"] > 1.0:
             geometry = MonopileGeometry(max(geometry.diameter_m - d_step_m, 0.1), geometry.wall_thickness_m, geometry.embedded_length_m)
@@ -774,9 +773,8 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
         # rather than just "the first geometry checked that happened to
         # pass." Diameter is deliberately not shrunk here -- it also feeds
         # NFA and the extreme-load calculation, and NFA is still pending
-        # its own verification (see docs/methodology.md).
+        # its own verification (see docs/method_update_log.md).
         while True:
-            t_floor_m = geometry.diameter_m / inputs.dt_ratio_max
             t_thinner_m = max(geometry.wall_thickness_m - t_step_m, t_floor_m)
             if t_thinner_m >= geometry.wall_thickness_m:
                 break
@@ -794,13 +792,19 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
             else:
                 break
 
+    dt_ratio_final = geometry.diameter_m / geometry.wall_thickness_m
+    if dt_ratio_final < inputs.dt_ratio_min or dt_ratio_final > inputs.dt_ratio_max:
+        result.notes.append(
+            f"D/t = {dt_ratio_final:.0f} is beyond general manufacturability "
+            f"requirements ({inputs.dt_ratio_min:.0f} < D/t < {inputs.dt_ratio_max:.0f})."
+        )
+
     if not converged:
         result.notes.append(
             "size_monopile did not converge: increasing diameter/thickness/length "
-            "within the configured bounds did not clear all five checks. This "
-            "usually means a check is dominated by an input outside the pile "
-            "geometry (e.g. tower stiffness for NFA) -- review DesignInputs "
-            "rather than relaxing the D/t or L/D bounds."
+            "did not clear all five checks within max_iterations. This usually "
+            "means a check is dominated by an input outside the pile geometry "
+            "(e.g. tower stiffness for NFA) -- review DesignInputs."
         )
     return result
 

@@ -1,0 +1,34 @@
+Requirement Specifications 
+
+- what is design driving ULS, FLS, SLS 
+- SLS check: what are beta, k_line, V_char, M_char?
+- Sec 7. : 
+. tower diameter (should come from WTG table) 
+. flexibility, where does it come from? flexibility = h^3/(3*EI_tower) + 1/K_L + h^2/K_R?
+
+- Sec 8 FLS, define all variables used in FLS calc, e.g. M_chat, delta_sigma_eq
+
+- sec 10, what is margin in governing check? how is it calculated? 
+
+Separate input 
+
+
+**** To be implemented 
+
+input:
+. 1p 
+. water depth 
+. Hs, Tp 
+. soil type (clay or ?)
+
+. tower outer diameter at interface 
+. rated rpm 
+
+use Weibull distribution to calculate realistic rpm_avg. 
+
+
+0.25, 0.17, 0.22
+
+
+
+**** implemented 
