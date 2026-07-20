@@ -744,6 +744,24 @@ a warning that the *stiffness* formula is out of its valid range — it never
 triggers the loop to lengthen the pile. In short: `L` is a derived ratio, not
 a solved-for design variable, in this model.
 
+**Why a stiffness-based check can't substitute for a capacity check here:**
+the closed-form `K_L`/`K_R` pile-head stiffness terms (§4) are built only
+from `k_soil`, `D`, and `EI` — for **clay**, `k_soil` is constant with depth,
+so `K_L`/`K_R` (and `beta`) have **zero dependence on `L`** at any length; for
+**sand**, `L` enters only weakly, through the `z_ref = L/3` approximation
+used to pick a representative `k_soil`. This isn't a coding gap so much as a
+property of the semi-infinite-beam solution itself: once a pile clears the
+`beta×L > 2.5` validity threshold, that closed-form solution says additional
+embedment doesn't change head stiffness. Practically, this means even a
+larger mudline moment (e.g. from deeper water) has no path to grow `L` in
+this model — not just because the iteration loop doesn't try, but because
+the checks it does run (SLS rotation, NFA) are mathematically insensitive to
+`L` for clay and only weakly sensitive for sand. **Future work:** implement
+an ultimate lateral/moment soil capacity check (e.g. Broms' method, or
+integrating ultimate p-y resistance over depth) and wire a
+capacity-failing → increase-`L` branch into the iteration loop — see
+`docs/method_update_log.md`.
+
 **Stopping conditions:** all five utilizations ≤ 1.0 (converged), OR
 diameter reaches **3× the initial guess** (runaway guard — appends a
 non-convergence note explaining that a check is likely dominated by an
@@ -837,7 +855,7 @@ review before results are used beyond early screening:
 18. Local shell buckling (`_shell_buckling_check`, §5a) — DNV-RP-C202 unstiffened cylinder, panel length assumed equal to the full exposed above-mudline shaft (no ring stiffeners). Often the governing check (5/15/22 MW all converge buckling-governed or near it). **Global (Euler) column buckling is not implemented** — axial load is small relative to elastic critical load, judged unlikely to govern for this structure type.
 19. `sigma_vm` in `_uls_check` omits axial stress (self-weight/pretension) and hoop/radial stress (external hydrostatic pressure) — only bending + shear are combined (§5).
 20. The post-convergence thickness-shrink step (§9) only shrinks wall thickness, not diameter — a design could still be carrying more diameter than strictly necessary. NFA is explicitly excluded from driving any shrink, pending its own verification (§10).
-21. **Embedded length `L` has no independent design driver** — it's a fixed `L/D=5` rule-of-thumb ratio at the initial guess, only ever changing as a passive side effect of the `L/D∈[3,8]` clamp when `D` changes for other reasons. No check evaluates ultimate lateral/moment soil capacity (e.g. Broms' method) to actually size embedment against load; `beta×L<2.5` (§4) is only a stiffness-formula validity warning, not a corrective design action (§9).
+21. **Embedded length `L` has no independent design driver** — it's a fixed `L/D=5` rule-of-thumb ratio at the initial guess, only ever changing as a passive side effect of the `L/D∈[3,12]` clamp when `D` changes for other reasons. This isn't only a loop-logic gap: the closed-form `K_L`/`K_R` stiffness terms driving SLS/NFA have **zero dependence on `L` for clay** and only a weak one for sand (§9), so even a wired-up "SLS failing → grow L" branch wouldn't fix the underlying issue for clay. No check evaluates ultimate lateral/moment soil **capacity** (e.g. Broms' method) to actually size embedment against load; `beta×L<2.5` (§4) is only a stiffness-formula validity warning, not a corrective design action. **Future work:** implement that capacity check (§9).
 22. **For most turbine sizes, the growth loop runs zero iterations** — `_initial_geometry`'s starting guess already satisfies ULS/SLS/NFA/FLS/Buckling, so `D` (and therefore `L`, via the fixed `L/D=5` ratio) never moves from the initial guess at all. A result can look like a converged, optimized design while actually being almost entirely the raw starting guess (§9).
 23. `D/t` bounds (default `[80, 160]`) are advisory, not a hard search limit (§9) — the converged geometry can fall outside them, flagged with a manufacturability warning note rather than being blocked from getting there.
 24. The 15 MW mudline wall-thickness reference figure (§2) is not table-sourced; an earlier image-derived chart estimate is doubted based on this engine's own converged D/t pattern (§2, §10).

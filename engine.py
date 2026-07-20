@@ -286,6 +286,21 @@ def _soil_stiffness(soil: SoilProfile, geometry: MonopileGeometry, ei_mnm2: floa
     Terzaghi-style correlation.
     Both are concept-stage approximations -- not a substitute for a full
     depth-varying p-y / PISA solve.
+
+    NOTE on embedded length L: K_L/K_R below are pile-HEAD STIFFNESS terms
+    only, from the classical semi-infinite-beam solution -- by construction
+    they have no L dependence for clay (k_soil is constant with depth, so
+    k_line/beta/K_L/K_R never see L at all) and only a weak one for sand (via
+    z_ref = L/3). This is mathematically correct for that closed-form
+    solution once beta*L clears the validity threshold checked below, but it
+    means this function alone can never be the reason embedment length grows
+    with moment/water depth -- that would require a separate ULTIMATE
+    lateral/moment soil CAPACITY check (e.g. Broms' method, or integrating
+    ultimate p-y resistance over depth), which does not exist yet in this
+    engine. FUTURE WORK: add such a capacity check and use it to drive L in
+    size_monopile, instead of L only ever moving as a side effect of the
+    L/D clamp on D (see docs/METHODOLOGY_REPORT.md Section 11 item 21 and
+    docs/method_update_log.md).
     """
     notes: list[str] = []
     d = geometry.diameter_m
@@ -704,6 +719,20 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
     - SLS failing: increase diameter (stiffens the foundation, reduces
       mudline rotation).
     - NFA failing high (too stiff, uncommon for monopiles): reduce diameter.
+
+    NOTE: embedded length L is never an independently-adjusted lever above --
+    none of the five branches touch it directly. L starts at L0=5*D0 (see
+    _initial_geometry) and afterward only changes as a passive side effect
+    of the L/D clamp reacting to D. This means e.g. a larger mudline moment
+    from deeper water never directly grows embedment, only diameter/
+    thickness. That's consistent with the current model: there is no
+    ultimate lateral/moment soil CAPACITY check (e.g. Broms' method) that
+    would give L a load-driven reason to grow -- see the NOTE in
+    _soil_stiffness for why the existing stiffness-based checks (SLS/NFA)
+    can't substitute for one, especially for clay. FUTURE WORK: implement
+    such a capacity check and wire a "capacity failing -> increase L" branch
+    into the loop below (see docs/METHODOLOGY_REPORT.md Section 11 item 21
+    and docs/method_update_log.md).
 
     dt_ratio_min/max are advisory, not a hard search bound (see docs/
     method_update_log.md): wall thickness is free to grow or shrink past
