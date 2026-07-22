@@ -28,6 +28,7 @@ class MooringLayout:
     d_sb_fl_m: float       # fairlead height above seabed/mudline
     k_ml_mn_per_m: float   # single-line axial stiffness, F = K_ml * d_ml
     t0_mn: float           # single-line pretension at the undisplaced (neutral) position
+    mbl_mn: float | None = None  # line minimum breaking load, if a real line has been selected (Section 5)
 
 
 def line_geometry(layout: MooringLayout) -> tuple[float, float]:
