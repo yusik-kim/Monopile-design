@@ -66,6 +66,7 @@ from bc90.mooring import (
     line_geometry,
     single_line_horizontal_stiffness,
     net_horizontal_stiffness,
+    net_horizontal_stiffness_dynamic,
     vertical_mooring_force,
     pile_flexibility,
     solve_mooring_reaction,
@@ -95,7 +96,8 @@ class BC90Result:
     # Mooring geometry, derived (Section 4a)
     theta_deg: float
     l_ml_m: float
-    k_ml_net_mn_per_m: float
+    k_ml_net_mn_per_m: float             # quasi-static, used for Section 4c/ULS/mooring-ULS/slack
+    k_ml_net_dynamic_mn_per_m: float      # dynamic/storm, used for NFA only (Section 7)
 
     # Net mudline / fairlead loads after the mooring reaction (Section 4c)
     m_char_mnm: float          # pre-mooring characteristic mudline moment (Section 3, unchanged)
@@ -233,8 +235,14 @@ def evaluate_bc90(inputs: DesignInputs, geometry: MonopileGeometry, mooring: Moo
     k_eq_baseline_n_per_m = (2 * math.pi * f0_baseline_hz) ** 2 * m_eff_kg
     f_hh = 1.0 / (k_eq_baseline_n_per_m / 1e6)   # N/m -> MN/m
 
+    # NFA uses the DYNAMIC line stiffness (falls back to k_ml_net if no
+    # separate dynamic value was given) -- Section 7 flags this distinction
+    # explicitly: NFA is a cyclic/dynamic phenomenon, so it should not reuse
+    # the same quasi-static K_ml the static Section 4c reaction/ULS/slack
+    # checks use.
     f_ha = pile_flexibility(mooring.d_sb_fl_m, hub_height_above_mudline_m, k_lateral, k_rocking, ei_pile_mnm2)
-    f_total = nfa_flexibility_correction(f_hh, f_ha, f_aa, k_ml_net)
+    k_ml_net_dynamic = net_horizontal_stiffness_dynamic(mooring)
+    f_total = nfa_flexibility_correction(f_hh, f_ha, f_aa, k_ml_net_dynamic)
     k_eq_bc90_n_per_m = (1.0 / f_total) * 1e6
     f0_hz = (1.0 / (2 * math.pi)) * math.sqrt(k_eq_bc90_n_per_m / m_eff_kg)
 
@@ -321,6 +329,7 @@ def evaluate_bc90(inputs: DesignInputs, geometry: MonopileGeometry, mooring: Moo
         theta_deg=math.degrees(theta_rad),
         l_ml_m=l_ml_m,
         k_ml_net_mn_per_m=k_ml_net,
+        k_ml_net_dynamic_mn_per_m=k_ml_net_dynamic,
         m_char_mnm=m_char_mnm,
         v_char_mn=v_char_mn,
         f_ml_mn=f_ml_mn,
@@ -357,3 +366,68 @@ def evaluate_bc90(inputs: DesignInputs, geometry: MonopileGeometry, mooring: Moo
 
 def result_as_dict(result: BC90Result) -> dict:
     return asdict(result)
+
+
+def _passes_all_checks(result: BC90Result) -> bool:
+    checks = [
+        result.uls_utilization, result.sls_utilization, result.nfa_utilization,
+        result.fls_utilization, result.buckling_utilization, result.slack_utilization,
+    ]
+    if result.mooring_uls_utilization is not None:
+        checks.append(result.mooring_uls_utilization)
+    return all(u <= 1.0 for u in checks)
+
+
+def shrink_geometry_with_mooring(inputs: DesignInputs, geometry: MonopileGeometry, mooring: MooringLayout,
+                                  d_step_m: float = 0.1, t_step_m: float = 0.002,
+                                  min_diameter_m: float = 0.5, min_thickness_m: float = 0.001
+                                  ) -> tuple[MonopileGeometry, BC90Result, bool]:
+    """Greedily shrink diameter, then wall thickness, holding the mooring
+    layout fixed, while every BC90 check stays <= 1.0. This is the OUTER
+    pile-geometry loop only (Section 0) -- mooring parameters (K_ml, T0,
+    R_a, d_sb_fl) are NOT co-optimized here, consistent with this phase's
+    nested-loop simplification (mooring sizing per Section 9a is a separate,
+    not-yet-automated exercise).
+
+    Diameter is shrunk first because a smaller diameter is exactly what
+    mooring is meant to enable (methodology report Section 4, Section 9);
+    thickness second, mirroring engine.py's size_monopile's own
+    thickness-shrink pass for the same reason (material minimization once
+    the checks already pass).
+
+    Not a general optimizer: greedy, single-direction, stops at the first
+    geometry that fails a check -- does not backtrack to try, e.g., a larger
+    diameter with thinner wall. Returns (geometry, result, started_passing):
+    started_passing is False if the INPUT geometry itself already fails a
+    BC90 check (nothing was shrunk in that case).
+    """
+    current = geometry
+    current_result = evaluate_bc90(inputs, current, mooring)
+    if not _passes_all_checks(current_result):
+        return current, current_result, False
+
+    while True:
+        smaller = MonopileGeometry(
+            max(current.diameter_m - d_step_m, min_diameter_m), current.wall_thickness_m, current.embedded_length_m
+        )
+        if smaller.diameter_m == current.diameter_m:
+            break
+        result = evaluate_bc90(inputs, smaller, mooring)
+        if _passes_all_checks(result):
+            current, current_result = smaller, result
+        else:
+            break
+
+    while True:
+        thinner = MonopileGeometry(
+            current.diameter_m, max(current.wall_thickness_m - t_step_m, min_thickness_m), current.embedded_length_m
+        )
+        if thinner.wall_thickness_m == current.wall_thickness_m:
+            break
+        result = evaluate_bc90(inputs, thinner, mooring)
+        if _passes_all_checks(result):
+            current, current_result = thinner, result
+        else:
+            break
+
+    return current, current_result, True

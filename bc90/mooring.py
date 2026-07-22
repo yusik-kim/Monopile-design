@@ -29,6 +29,12 @@ class MooringLayout:
     k_ml_mn_per_m: float   # single-line axial stiffness, F = K_ml * d_ml
     t0_mn: float           # single-line pretension at the undisplaced (neutral) position
     mbl_mn: float | None = None  # line minimum breaking load, if a real line has been selected (Section 5)
+    k_ml_dynamic_mn_per_m: float | None = None  # dynamic/storm axial stiffness, if it differs from
+                                                 # k_ml_mn_per_m (quasi-static) -- Section 7. Falls
+                                                 # back to k_ml_mn_per_m when not set (e.g. for chain/
+                                                 # wire, where the two are close enough not to matter
+                                                 # at concept stage; real synthetic rope typically has
+                                                 # dynamic EA well above quasi-static EA).
 
 
 def line_geometry(layout: MooringLayout) -> tuple[float, float]:
@@ -57,6 +63,48 @@ def net_horizontal_stiffness(layout: MooringLayout, n_ml: int = N_ML) -> float:
     if n_ml < 3:
         raise ValueError("isotropy result requires n_ml >= 3 equally-spaced lines")
     return (n_ml / 2.0) * single_line_horizontal_stiffness(layout)
+
+
+def net_horizontal_stiffness_dynamic(layout: MooringLayout, n_ml: int = N_ML) -> float:
+    """Net horizontal stiffness using the DYNAMIC/storm line stiffness
+    (falls back to the quasi-static k_ml_mn_per_m if k_ml_dynamic_mn_per_m
+    isn't set) -- for NFA only (Section 7), which is inherently a dynamic
+    /cyclic phenomenon. All other checks (Section 4c's static reaction,
+    mooring-line ULS, the slack check) use the quasi-static
+    net_horizontal_stiffness instead, per the methodology report's own
+    flagged quasi-static-vs-dynamic distinction.
+    """
+    if n_ml < 3:
+        raise ValueError("isotropy result requires n_ml >= 3 equally-spaced lines")
+    theta_rad, _ = line_geometry(layout)
+    k_dyn = layout.k_ml_dynamic_mn_per_m if layout.k_ml_dynamic_mn_per_m is not None else layout.k_ml_mn_per_m
+    return (n_ml / 2.0) * k_dyn * math.cos(theta_rad) ** 2
+
+
+def layout_from_line_data(r_a_m: float, d_sb_fl_m: float, mbl_mn: float,
+                           ea_quasi_static_mn: float, ea_dynamic_mn: float | None = None,
+                           pretension_fraction: float = 0.15) -> MooringLayout:
+    """Build a MooringLayout from real mooring-line product data (MBL and
+    axial rigidity EA) rather than guessing K_ml/T0 directly -- the approach
+    Section 9a itself recommends (derive K_ml from EA/L_ml, not pick it
+    freestanding). L_ml follows from the chosen (r_a_m, d_sb_fl_m) geometry.
+
+    pretension_fraction defaults to 15% of MBL, within the commonly-cited
+    15-20% MBL industry range for taut floating-wind mooring pretension --
+    but note that convention comes from floating-vessel station-keeping
+    design, not a fixed structure like BC90; the actual governing constraint
+    for BC90 is the slack/ΔF_max criterion (Section 9a), so treat this as a
+    starting point to be checked against evaluate_bc90's slack_utilization,
+    not a substitute for it.
+    """
+    l_ml_m = math.hypot(r_a_m, d_sb_fl_m)
+    k_ml_mn_per_m = ea_quasi_static_mn / l_ml_m
+    k_ml_dynamic_mn_per_m = (ea_dynamic_mn / l_ml_m) if ea_dynamic_mn is not None else None
+    t0_mn = pretension_fraction * mbl_mn
+    return MooringLayout(
+        r_a_m=r_a_m, d_sb_fl_m=d_sb_fl_m, k_ml_mn_per_m=k_ml_mn_per_m, t0_mn=t0_mn,
+        mbl_mn=mbl_mn, k_ml_dynamic_mn_per_m=k_ml_dynamic_mn_per_m,
+    )
 
 
 def vertical_mooring_force(layout: MooringLayout, n_ml: int = N_ML) -> float:
