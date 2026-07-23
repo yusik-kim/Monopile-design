@@ -84,8 +84,30 @@ from bc90.mooring import (
 # ---------------------------------------------------------------------------
 GAMMA_ML_ULS = 1.75              # partial factor on mooring line tension, DNV-OS-E301-style
 T_MIN_FRACTION = 0.05             # minimum allowable tension as a fraction of T0 (slack margin)
-USD_PER_M_MOORING_LINE = 500.0    # mooring line unit cost, placeholder
+USD_PER_M_MOORING_LINE = 500.0    # mooring line unit cost, fallback placeholder used only when
+                                   # mooring.mbl_mn is unset -- see polyester_cost_per_m_usd below
+                                   # for the sourced, MBL-dependent replacement used otherwise.
 USD_PER_ANCHOR = 250_000.0        # anchor unit cost, placeholder (does not model holding-capacity dependence)
+
+# Polyester mooring line cost vs. MBL, sourced 2026-07-24 (docs/
+# mooring_line_database.md Section 10a): Striani et al. 2025 (J. Mar. Sci.
+# Eng. 13(12), 2341), Eq. (2): C = (0.0138*MBL_kN + 11.281)*L_m [EUR], i.e.
+# cost/m depends only on MBL (L_m cancels). Replaces the flat
+# USD_PER_M_MOORING_LINE placeholder above -- that constant significantly
+# overstated cost at MBL=15 MN ($500/m vs. the sourced ~$236/m). Floating
+# -wind shared-mooring cost model, not BC90-specific -- see the doc for the
+# full context caveat.
+_POLYESTER_COST_EUR_PER_KN_MBL = 0.0138
+_POLYESTER_COST_EUR_INTERCEPT = 11.281
+EUR_TO_USD_FX = 1.08              # indicative, unsourced -- order-of-magnitude USD conversion only
+
+
+def polyester_cost_per_m_usd(mbl_mn: float) -> float:
+    """Sourced polyester line cost per meter as a function of MBL (see
+    Section 10a citation above). MBL here is in MN (this codebase's
+    convention); the source's formula takes kN, hence the *1000."""
+    cost_eur_per_m = _POLYESTER_COST_EUR_PER_KN_MBL * (mbl_mn * 1000.0) + _POLYESTER_COST_EUR_INTERCEPT
+    return cost_eur_per_m * EUR_TO_USD_FX
 
 
 @dataclass
@@ -102,6 +124,7 @@ class BC90Result:
     # Net mudline / fairlead loads after the mooring reaction (Section 4c)
     m_char_mnm: float          # pre-mooring characteristic mudline moment (Section 3, unchanged)
     v_char_mn: float           # pre-mooring characteristic mudline shear (Section 3, unchanged)
+    delta_fl0_m: float          # unrestrained (no-mooring) fairlead deflection under thrust+wave, Section 4c
     f_ml_mn: float             # net mooring reaction at the fairlead
     m_char_net_mnm: float
     v_char_net_mn: float
@@ -307,7 +330,8 @@ def evaluate_bc90(inputs: DesignInputs, geometry: MonopileGeometry, mooring: Moo
     steel_mass_t = area_m2 * geometry.embedded_length_m * STEEL_DENSITY_T_PER_M3
     steel_cost_usd = steel_mass_t * USD_PER_T_STEEL
 
-    mooring_line_cost_usd = N_ML * l_ml_m * USD_PER_M_MOORING_LINE
+    cost_per_m_usd = polyester_cost_per_m_usd(mooring.mbl_mn) if mooring.mbl_mn is not None else USD_PER_M_MOORING_LINE
+    mooring_line_cost_usd = N_ML * l_ml_m * cost_per_m_usd
     anchor_cost_usd = N_ML * USD_PER_ANCHOR
     total_capex_usd = steel_cost_usd + mooring_line_cost_usd + anchor_cost_usd
 
@@ -332,6 +356,7 @@ def evaluate_bc90(inputs: DesignInputs, geometry: MonopileGeometry, mooring: Moo
         k_ml_net_dynamic_mn_per_m=k_ml_net_dynamic,
         m_char_mnm=m_char_mnm,
         v_char_mn=v_char_mn,
+        delta_fl0_m=delta_fl0_m,
         f_ml_mn=f_ml_mn,
         m_char_net_mnm=m_char_net_mnm,
         v_char_net_mn=v_char_net_mn,
