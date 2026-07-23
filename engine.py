@@ -718,7 +718,10 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
       elastic buckling capacity (see _shell_buckling_check).
     - SLS failing: increase diameter (stiffens the foundation, reduces
       mudline rotation).
-    - NFA failing high (too stiff, uncommon for monopiles): reduce diameter.
+    - NFA failing high (too stiff, uncommon for monopiles): reduce diameter,
+      but not past the point where the smaller diameter would itself violate
+      ULS/FLS/Buckling capacity at the current wall thickness -- see the
+      guard in the NFA-too-stiff branch below.
 
     NOTE: embedded length L is never an independently-adjusted lever above --
     none of the five branches touch it directly. L starts at L0=5*D0 (see
@@ -759,6 +762,21 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
             l = inputs.l_over_d_max * d
         return MonopileGeometry(d, t, l)
 
+    def _note_nfa_stiff_accepted(res: MonopileResult) -> None:
+        # Stiff-side NFA (f0 above the band's upper edge, i.e. above 3P
+        # minimum) is not normally safety-critical for monopiles -- unlike
+        # the too-soft case, it mainly risks resonance with a rarely-hit
+        # high-rpm operating point rather than a persistent one. Accept this
+        # geometry as final rather than spiraling D/t into an unrealistic
+        # ratio just to chase NFA <= 1.0.
+        res.notes.append(
+            f"NFA utilization {res.nfa_utilization:.3f} > 1.0: natural frequency "
+            f"f0={res.natural_frequency_hz:.4f} Hz is above the soft-stiff band's "
+            f"upper edge ({res.soft_stiff_band_hz[1]:.4f} Hz, 3P minimum). "
+            "Stiff-side exceedance is usually not safety-critical for monopiles, "
+            "so this geometry is accepted as the final design despite NFA > 1.0."
+        )
+
     d_runaway_cap_m = 3.0 * geometry.diameter_m  # if this is exceeded, D is not resolving the failing check(s)
 
     result = evaluate_monopile(inputs, geometry)
@@ -787,7 +805,33 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
         elif checks["SLS"] > 1.0:
             geometry = MonopileGeometry(geometry.diameter_m + d_step_m, geometry.wall_thickness_m, geometry.embedded_length_m)
         elif checks["NFA"] > 1.0:
-            geometry = MonopileGeometry(max(geometry.diameter_m - d_step_m, 0.1), geometry.wall_thickness_m, geometry.embedded_length_m)
+            nfa_too_stiff = result.natural_frequency_hz > result.soft_stiff_band_hz[1]
+            trial = _clamped(MonopileGeometry(
+                max(geometry.diameter_m - d_step_m, 0.1), geometry.wall_thickness_m, geometry.embedded_length_m
+            ))
+            if trial.diameter_m == geometry.diameter_m:
+                # Already at the diameter floor, nothing left to try.
+                if nfa_too_stiff:
+                    _note_nfa_stiff_accepted(result)
+                    converged = True
+                break
+            trial_result = evaluate_monopile(inputs, trial)
+            if (trial_result.uls_utilization > 1.0 or trial_result.fls_utilization > 1.0
+                    or trial_result.buckling_utilization > 1.0):
+                # Shrinking D further to relieve an NFA-too-stiff reading would
+                # itself break ULS/FLS/Buckling capacity at the current wall
+                # thickness. This heuristic has no other lever for NFA-too-
+                # stiff (see docstring), so stop here rather than spiral into
+                # a shrink-D/grow-t tug-of-war that lands on an unrealistic
+                # D/t ratio. If it's specifically the stiff-side case, that's
+                # usually not safety-critical, so accept the geometry instead
+                # of flagging non-convergence.
+                if nfa_too_stiff:
+                    _note_nfa_stiff_accepted(result)
+                    converged = True
+                break
+            geometry, result = trial, trial_result
+            continue
 
         geometry = _clamped(geometry)
         result = evaluate_monopile(inputs, geometry)
