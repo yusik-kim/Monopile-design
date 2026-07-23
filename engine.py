@@ -793,6 +793,50 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
         result = evaluate_monopile(inputs, geometry)
 
     if converged:
+        # Shrink diameter step-wise (holding wall thickness fixed) while every
+        # check stays <= 1.0. The growth loop above only ever adds diameter
+        # (never shrinks it) and stops at the first passing geometry, so it
+        # can converge with real diameter headroom left on the table -- the
+        # same class of gap the thickness-shrink step below already existed
+        # to close for wall thickness. bc90/engine_bc90.py's
+        # shrink_geometry_with_mooring already established this exact pattern
+        # (shrink D holding t, then shrink t holding D) for the BC90
+        # extension; this applies it to the baseline too.
+        #
+        # Caveat carried over from the historical reason this was skipped:
+        # NFA's f0 prediction is not yet independently verified (see docs/
+        # method_update_log.md, "NFA is not yet verified"). Shrinking D
+        # relies on whichever check governs at the smaller diameter; if that
+        # turns out to be NFA, the result leans on an unverified formula more
+        # than a ULS/FLS/Buckling/SLS-governed one would. Flagged in notes
+        # below when it applies, rather than silently accepted.
+        while True:
+            smaller_geometry = _clamped(MonopileGeometry(
+                max(geometry.diameter_m - d_step_m, 0.1), geometry.wall_thickness_m, geometry.embedded_length_m
+            ))
+            if smaller_geometry.diameter_m == geometry.diameter_m:
+                break
+            smaller_result = evaluate_monopile(inputs, smaller_geometry)
+            smaller_checks = (
+                smaller_result.uls_utilization,
+                smaller_result.sls_utilization,
+                smaller_result.nfa_utilization,
+                smaller_result.fls_utilization,
+                smaller_result.buckling_utilization,
+            )
+            if all(u <= 1.0 for u in smaller_checks):
+                geometry, result = smaller_geometry, smaller_result
+            else:
+                break
+
+        if result.governing_constraint == "NFA":
+            result.notes.append(
+                "Diameter shrink stopped with NFA as the governing constraint, "
+                "which is not yet independently verified (see docs/"
+                "method_update_log.md) -- treat this diameter with more "
+                "caution than one stopped by ULS/FLS/Buckling/SLS."
+            )
+
         # The growth loop above only ever adds material and stops at the
         # first passing geometry -- if the initial guess (t0 = D/110)
         # already satisfies every check, it never runs at all, leaving
@@ -800,9 +844,7 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
         # actually have. Shrink thickness step-wise while every check stays
         # <= 1.0, so the result reflects the true minimum-material thickness
         # rather than just "the first geometry checked that happened to
-        # pass." Diameter is deliberately not shrunk here -- it also feeds
-        # NFA and the extreme-load calculation, and NFA is still pending
-        # its own verification (see docs/method_update_log.md).
+        # pass," at the now diameter-minimized geometry above.
         while True:
             t_thinner_m = max(geometry.wall_thickness_m - t_step_m, t_floor_m)
             if t_thinner_m >= geometry.wall_thickness_m:
