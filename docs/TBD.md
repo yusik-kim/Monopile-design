@@ -10,3 +10,5 @@ Status values: `open` / `discussed` (no implementation needed) / `implemented` /
 | Date Added | Item | Status | Status Updated |
 |---|---|---|---|
 | 2026-07-23 | sensitivity test for pretension_fraction | open | 2026-07-23 |
+| 2026-07-23 | Update Mater branch of MP design to add D-shrink enabled for genuine optimisation. | implemented | 2026-07-23 |
+| 2026-07-23 | check whether pretension_fraction set to high in the code | open | 2026-07-23 |
