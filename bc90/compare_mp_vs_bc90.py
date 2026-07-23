@@ -28,9 +28,14 @@ References used for the mooring line data below:
   general mooring-engineering literature (e.g. Del Vecchio-type test data
   cited across multiple sources), not independently re-derived here.
 - Pretension: 15-20% MBL is the commonly-cited industry range for taut
-  floating-wind mooring; used only as a SANITY check here, not the governing
-  criterion -- see layout_from_line_data's docstring for why BC90's own
-  slack/delta-F_max criterion (Section 9a) governs instead.
+  floating-wind mooring, but is NOT used here. This script instead
+  deliberately maximizes T0 (for slack margin) up to 90% of the ceiling set
+  by the mooring line's own ULS check (T0 <= mbl_mn/GAMMA_ML_ULS -
+  delta_t_max_mn), floored at the Section 9a load-margin value
+  (1.35x the extreme incremental tension) so it never goes below that
+  minimum. This trades slack margin against mooring-line ULS utilization and
+  pile buckling utilization (higher T0 -> more axial load via
+  Fz=N_ml*T0*sin(theta), Section 5a) -- see build_mooring_layout's docstring.
 """
 import os
 import sys
@@ -38,7 +43,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine import DesignInputs, SoilProfile, size_monopile
-from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring
+from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring, GAMMA_ML_ULS
 from bc90.mooring import MooringLayout, layout_from_line_data
 
 
@@ -60,6 +65,19 @@ def build_mooring_layout(r_a_m: float, d_sb_fl_m: float) -> MooringLayout:
     data, then one refinement pass on T0 using BC90's own slack criterion
     (Section 9a: T0 ~ 1.2-1.5x the extreme incremental tension), rather than
     trusting the 15%-MBL floating-vessel convention on its own.
+
+    Pass-1's pretension_fraction is a placeholder guess (0.15): T0 is
+    ultimately an outcome of the loads (via delta_fl0/F_ml, Section 4c),
+    which are themselves a function of MP sizing, so no a-priori fraction
+    guessed here can be more than a placeholder. It CANNOT simply be pushed
+    to an extreme (e.g. 1.0) to "play it safe", though: K_ml is derived from
+    MBL via EA = 13.5x_MBL (mooring.py's layout_from_line_data), so a bigger
+    pass-1 T0 -> bigger pass-1 T_max -> bigger mbl_required_mn -> bigger
+    final MBL -> proportionally STIFFER final K_ml. That is a real physics
+    change, not a free conservative margin -- tried here with
+    pretension_fraction=1.0 and it roughly doubled K_ml (3.24 -> 7.16 MN/m
+    in the default case), which pushed the "same geometry as MP" case into
+    slack failure (T_min < 0) that doesn't occur at 0.15. Keep this modest.
     """
     guess_mbl_mn = 15.0
     layout_pass1 = layout_from_line_data(
@@ -71,14 +89,32 @@ def build_mooring_layout(r_a_m: float, d_sb_fl_m: float) -> MooringLayout:
     result_pass1 = evaluate_bc90(inputs, baseline_geometry, layout_pass1)
     delta_t_max_mn = result_pass1.mooring_t_max_mn - layout_pass1.t0_mn
 
-    t0_mn = 1.35 * delta_t_max_mn  # Section 9a: 1.2-1.5x margin over the extreme incremental tension
     mbl_required_mn = result_pass1.mbl_required_mn
     mbl_mn = max(guess_mbl_mn, 1.25 * mbl_required_mn)  # round up with 25% margin over the computed requirement
+
+    # T0 is capped by the SAME line's own mooring-ULS check, independent of slack:
+    #   mooring_uls_utilization = gamma_ML_ULS * (T0 + delta_t_max_mn) / mbl_mn  <= 1
+    #   =>  T0 <= mbl_mn / GAMMA_ML_ULS - delta_t_max_mn
+    # Maximizing T0 for slack margin means approaching this ceiling, not pushing
+    # pretension_fraction toward 1.0 (which corrupts K_ml via the EA=13.5xMBL
+    # convention, and which independently fails mooring ULS outright: T0=MBL
+    # alone already gives utilization=GAMMA_ML_ULS=1.75 > 1, before any load
+    # swing is even added). Take 90% of that ceiling as the target, floored at
+    # the Section 9a load-margin value so T0 never drops below the original
+    # slack-only criterion.
+    t0_uls_ceiling_mn = mbl_mn / GAMMA_ML_ULS - delta_t_max_mn
+    t0_load_margin_mn = 1.35 * delta_t_max_mn  # Section 9a: 1.2-1.5x margin over the extreme incremental tension
+    t0_mn = max(t0_load_margin_mn, 0.90 * t0_uls_ceiling_mn)
+
+    pretension_fraction_final = t0_mn / mbl_mn
+    print(f"  NOTE: T0 set to {pretension_fraction_final:.1%} of MBL (targeting 90% of the mooring-ULS "
+          f"ceiling, {100*t0_uls_ceiling_mn/mbl_mn:.1f}% of MBL) for maximum slack margin -- check the "
+          f"printed Buck utilization below, since higher T0 also raises axial load via Fz=N_ml*T0*sin(theta) (Sec 5a).")
 
     return layout_from_line_data(
         r_a_m=r_a_m, d_sb_fl_m=d_sb_fl_m, mbl_mn=mbl_mn,
         ea_quasi_static_mn=13.5 * mbl_mn, ea_dynamic_mn=26.5 * mbl_mn,
-        pretension_fraction=t0_mn / mbl_mn,
+        pretension_fraction=pretension_fraction_final,
     )
 
 
