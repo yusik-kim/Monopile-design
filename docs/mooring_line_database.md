@@ -32,7 +32,7 @@ directionally the right industry precedent, not a like-for-like match.
 | Pretension 15–20% MBL (`layout_from_line_data` docstring) | 0.15 default | **Now has a real citable convention**: DNV-OS-E301 itself does not mandate a numeric pretension fraction (it just requires "the relevant pretension shall be applied for the operating state," §B406) — the 10–20% MBL figure is an *industry rule-of-thumb* repeated across multiple floating-wind mooring papers/theses (see §9), not a DNV requirement. | **Partially confirmed**: the range is real and widely used, but its authority is "common practice cited across many secondary sources," not a numbered clause in a standard — code's phrasing (informal convention) is more accurate than calling it a standard. |
 | `GAMMA_ML_ULS = 1.75` | 1.75, "DNV-OS-E301-style, 1.5–2.0" | **Found the actual DNV-OS-E301 (Oct 2008) Table D1** (§8 below): for a **quasi-static** analysis (the structural equivalent of BC90's single-scalar model) the factor is **1.70 for Consequence Class 1** or **2.50 for Consequence Class 2** — applied as one factor on total characteristic tension, matching BC90's `γ×T_max` structure. For a **dynamic** analysis DNV instead splits tension into mean+dynamic components with *separate* factors (1.10/1.50 CC1, 1.40/2.10 CC2) — a structurally different equation BC90 does not implement. | **Contradicted/refined**: 1.75 sits just above the CC1 quasi-static value (1.70) but far below CC2 (2.50) — reasonable *if* BC90's mooring assist is judged Consequence Class 1 (failure "unlikely to lead to unacceptable consequences," §D101) and analyzed quasi-statically. If CC2, or if BC90 is judged a non-redundant single-point system (§D203, ×1.2 uplift on the whole table), the required factor is 2.04–3.0, materially higher than 1.75. **This determination (CC1 vs CC2) is a judgment call the methodology report has not yet made — flagged as the actual open item**, not the numeric value itself. |
 | `T_MIN_FRACTION = 0.05` | 0.05 | **Not found.** DNV-OS-E301 requires anchors not designed for uplift to keep lines from going slack at all (§D801) and separately requires the anchor line to have "enough length to avoid uplift... for all relevant design conditions in the ULS" — it does not define a numeric minimum-tension fraction of T0/MBL comparable to `T_MIN_FRACTION`. No other source searched gave one either. | **Gap confirmed** — remains an unsourced, arbitrary placeholder; nothing found to replace it with. |
-| `USD_PER_M_MOORING_LINE = $500/m` | $500/m | No manufacturer or industry report gives a direct, generalizable $/m figure (see §10). One methodology (NREL wave-energy-converter mooring cost work, cited only secondhand, formula not recovered) prices chain/polyester as $/m scaling with diameter². A rough **derived-here** back-of-envelope from BVG Associates' 1 GW floating-wind farm mooring-line total (£175M, no length breakdown given) could not be converted to $/m without an assumed total line footage the source doesn't provide — attempted and abandoned as too speculative (see §10). | **Gap** — no defensible replacement number found; $500/m remains unverified either way. |
+| `USD_PER_M_MOORING_LINE = $500/m` | $500/m | **Now sourced for polyester specifically**: Striani et al. 2025 (J. Mar. Sci. Eng. 13(12), 2341), Eq. (2): `C_polyester = (0.0138·MBL + 11.281)·L_m` [EUR], MBL in kN, L_m in m — a per-meter cost linear in MBL, not the flat $500/m the code currently uses regardless of line size (see §10 for the computed table). | **Contradicted (for polyester)**: at the tool's current default MBL=15 MN, Eq.(2) gives ≈€218/m (≈$236/m at an indicative FX rate) — well under $500/m, and the relationship is MBL-dependent where the code's constant is not. Chain/wire/HMPE $/m remain unsourced gaps (see §10). |
 | `USD_PER_ANCHOR = $250,000` | $250,000 | BVG Associates: drag-embedment anchor cost ≈£35M for a 1 GW floating wind farm (§7, §10). **Derived here**: assuming 15 MW turbines (~67 turbines/GW) × 3 lines/anchors each = 201 anchors, £35M / 201 ≈ £174,000/anchor ≈ **$221,000/anchor** at an indicative ~1.27 USD/GBP rate. | **Roughly confirmed in floating-wind drag-anchor terms** — same order of magnitude as $250,000 — but this is a *derived* estimate built on assumptions the source doesn't state (turbine size, anchors/turbine), and it prices a floating-wind drag anchor sized for full station-keeping, not a BC90 anchor sized for a much smaller assist load in 60–90 m water. Treat the closeness as coincidental, not validation, and note it does not model holding-capacity dependence, exactly as the code's own comment already flags. |
 
 ---
@@ -48,7 +48,8 @@ directionally the right industry precedent, not a like-for-like match.
 | Long-term mooring (LTM) fatigue-life check | replacement-based fibre segments require calculated/design fatigue life ratio of 5–8 (5 if no replacement planned, 3 if replacement is planned) | DNV-OS-E301 §F703 | Primary |
 | Stiffness models required by DNV | Full non-linear force-elongation curve preferred; if unavailable, static stiffness for mean/LF tension + dynamic stiffness for WF tension; stiffness of synthetic rope "has to be verified by testing" per certification (DNV-OS-E303) | DNV-OS-E301 §B107–B108 | Primary (existence of the requirement); the underlying test curve itself is rope-specific and not reproduced here |
 | MBL vs diameter table | **Not found** — manufacturer datasheets (Bexco/Bekaert "Bridon MoorLine", Lankhorst "Ecoline"/"Gama 98") are referenced across multiple sources as the standard commercial source but full public tables were not retrievable (available "on request" per manufacturer sites) | Bexco (bexco.be), Lankhorst Ropes (lankhorstropes.com) — existence confirmed, table contents not accessed | Gap (source identified, data not obtained) |
-| Cost per meter / per MBL | **Not found** directly. Nylon-vs-polyester comparison implies polyester is *more* expensive per unit of compliance than nylon (40–45% total mooring-system cost saving reported for nylon vs polyester in a 100-turbine farm study) | Acteon blog "Is nylon rope a better mooring systems option for FOW?", citing Ruiz-Minguela et al., "Assessment of nylon versus polyester ropes for mooring of floating wind turbines," Ocean Engineering (ScienceDirect, 2023) | Secondary (relative comparison only, no absolute $/m) |
+| Cost per meter | **`C_polyester = (0.0138·MBL_kN + 11.281)·L_m` [EUR]** → cost/m = `0.0138·MBL_kN + 11.281` EUR/m (L_m cancels out of the per-meter figure) — see §10 for the computed table across MBL=5–30 MN | **Striani, Jiang, Biroli, Shao & Wang (2025), "Review of Floating Offshore Wind Turbines with Shared Mooring Systems," J. Mar. Sci. Eng. 13(12), 2341, Eq. (2), p.17** — read directly from the PDF; the paper's own text attributes the correlation to a DTOcean+-style cost-estimation model (§5, citing Chemineau et al. 2023) rather than deriving it themselves | **Primary** (read directly), though the underlying correlation's ultimate origin (DTOcean+ deliverable D4.6, ref [72] in that paper) was not independently re-verified this session |
+| Cost per meter (relative, not absolute) | Nylon-vs-polyester comparison implies polyester is *more* expensive per unit of compliance than nylon (40–45% total mooring-system cost saving reported for nylon vs polyester in a 100-turbine farm study) | Acteon blog "Is nylon rope a better mooring systems option for FOW?", citing Ruiz-Minguela et al., "Assessment of nylon versus polyester ropes for mooring of floating wind turbines," Ocean Engineering (ScienceDirect, 2023) | Secondary (relative comparison only, no absolute $/m) |
 | Why polyester is the current default choice | "Proven for permanent moorings for decades"; predictable axial stiffness (bounded, largely load-history-insensitive) vs. nylon's strongly rate/amplitude-dependent behavior; superior UV and wear resistance vs. nylon in wet conditions | Acteon blog (as above); PLOS ONE 2025 "Mechanical behavior of synthetic fiber ropes for mooring floating offshore wind turbines" (Guo et al.) — found polyester's static stiffness (~1,637–1,847 kN at 30–60% MBS) more stable than nylon's (~1,193–1,340 kN) across load levels, and superior wet wear resistance | Secondary |
 
 **Net assessment for §1's placeholders:** the 13.5×/26.5× EA figures in the code are an accurate paraphrase of real (if paywalled) papers, and the broader literature's ~13×/~30× figures don't contradict them — no primary-standard number was found to replace them, so they remain the best available approximation, just still "secondary, not independently re-derived" exactly as the code already says.
@@ -237,20 +238,72 @@ sanity check, not a governing constraint — that framing holds up.
 | "Jewellery" (connectors/fittings), 1 GW | ≈£98 million | Same source, "B.3.3 Jewellery" | Secondary, aggregate only |
 | Anchor/mooring pre-installation (vessel time etc.), 1 GW | ≈£153 million | Same source, "I.4 Anchor and mooring pre-installation" | Secondary, aggregate only |
 | Derived anchor unit cost | ≈**$221,000/anchor** — **derived here**: £35M ÷ (assumed 67×15MW turbines × 3 anchors/turbine = 201 anchors) × ~1.27 USD/GBP. Assumptions (turbine size, anchors/turbine) are not stated in the source and are mine, made explicit here rather than left implicit. | Derived from the above | **Derived here** — order-of-magnitude only |
-| Mooring line unit cost ($/m) | **Not derived** — the source gives no total line-length figure, so £175M cannot be converted to $/m without an additional unstated assumption (e.g. average line length per turbine) that would be pure guesswork; abandoned rather than fabricated | — | Gap |
+| Mooring line unit cost ($/m), polyester | **Found**: Striani et al. 2025, Eq. (2) — see table and citation immediately below. Chain (Eq. 1), single anchor (Eq. 3), and shared-anchor (Eq. 4) correlations are given in the same source but not computed here since only the polyester relation was requested. | Striani et al. 2025, Eqs. (1)–(4), p.17 | **Primary** for polyester (Eq. 2); chain/anchor equations available for a future pass |
+| Mooring line unit cost ($/m), BVG Associates aggregate route | **Not derived** — the source gives no total line-length figure, so £175M cannot be converted to $/m without an additional unstated assumption (e.g. average line length per turbine) that would be pure guesswork; abandoned rather than fabricated | — | Gap (superseded for polyester by the row above) |
 | Cost-modeling functional form referenced in literature | NREL wave-energy-converter mooring-cost methodology reportedly prices chain and polyester rope in $/m scaling with (line diameter)² — i.e. cost ∝ d² — consistent with how MBL itself scales with d² for both chain and rope | Search-indexed summary of NREL WEC mooring cost methodology; **coefficient values not recovered**, functional form only | Secondary, structure only — **not usable to produce an actual $/m number** |
 | HMPE cost vs. polyester | Conflicting: 15–30% retail premium (low-confidence, non-offshore market) vs. a peer-reviewed claim that HMPE's "poor economics" mean no net FOWT mooring cost advantage; separately, a different claim that HMPE cuts total system cost 15–20% over 20 years via reduced replacement | See §3 | Mixed / contradictory, flagged not resolved |
 | Nylon cost vs. polyester | ≈40–45% total system cost reduction reported for a 100-turbine farm | Acteon / Ruiz-Minguela et al. 2023 | Secondary |
 | Global offshore mooring chain (floating wind) market size | ≈$114M (2023) → ≈$1,020M (2030F), CAGR 37.9% | Valuates Reports market-sizing summary | Secondary, market total — **not a unit cost, not usable for per-line/per-tonne costing** |
 | Direct manufacturer $/m or $/tonne for chain, polyester, wire, HMPE | **Not found** for any material | Multiple manufacturer sites checked (Bexco, Lankhorst, Dawson Group, Bekaert) — datasheets exist but pricing is "on request," not published | Gap across the board |
 
-**Bottom line for §1:** neither `USD_PER_M_MOORING_LINE` nor `USD_PER_ANCHOR`
-can be replaced with a properly sourced number from this session's research.
-The anchor figure happens to land close to the aggregate-derived estimate
-(coincidental, not confirmatory, given the assumptions required to get there);
-the per-meter line cost has no defensible replacement at all and remains a
-flagged gap for a future pass (e.g., obtaining an actual manufacturer quote or
-a published $/m table would resolve it directly).
+### 10a. Polyester cost vs. MBL (Striani et al. 2025, Eq. 2)
+
+`C_polyester = (0.0138 · MBL + 11.281) · L_m` [EUR], where `MBL` is in **kN**
+(not MN — the tool's convention) and `L_m` is line length in m. Dividing by
+`L_m` gives a per-meter cost that depends only on MBL:
+
+```
+cost_per_m [EUR/m] = 0.0138 * MBL_kN + 11.281 = 13.8 * MBL_MN + 11.281
+```
+
+| MBL (MN) | Cost (EUR/m) | Cost (USD/m, indicative FX 1 EUR≈1.08 USD) |
+|---|---|---|
+| 5 | 80.3 | 86.7 |
+| 10 | 149.3 | 161.2 |
+| 15 | 218.3 | 235.7 |
+| 20 | 287.3 | 310.3 |
+| 25 | 356.3 | 384.8 |
+| 30 | 425.3 | 459.3 |
+
+The USD column applies an indicative, unsourced FX conversion for
+order-of-magnitude comparison against the code's USD-denominated constant —
+not a sourced number in its own right. Context caveat: this correlation, like
+most of this database, comes from **floating**-wind shared-mooring cost
+analysis (via a DTOcean+-style model), not a BC90-type bottom-founded
+supplementary-mooring application specifically.
+
+Companion equations in the same source (not computed into a table here, since
+only the polyester relation was requested — available for a future pass):
+`C_chain = (0.055·MBL − 83.41)·L_m` [EUR] (Eq. 1), `C_anchor,single =
+9.484·MBL` [EUR] (Eq. 3, MBL in kN), `C_anchor,shared = M·C_material·(1+CF)`
+[EUR] (Eq. 4, M = anchor mass in kg, C_material in EUR/kg).
+
+**Unverified supplementary commentary (excluded from the sourced rows above,
+noted for transparency only):** a ChatGPT conversation referenced alongside
+this request initially presented a diameter-indexed MBL/weight/cost table
+attributed to a Bekaert catalogue, then retracted it in the same conversation
+("those cost figures did not come from the Bekaert catalogue... I should have
+explicitly labelled them as such"). That table, and an accompanying "typical
+design properties" table (axial stiffness, elongation, density, safety
+factor) from the same unverified turn, are deliberately **not** included here.
+Two ideas from that conversation may be worth independent verification later,
+but are not treated as sourced: (1) a supplier-adjustment factor `f_sup`
+(0.8 optimistic / 1.0 literature / 1.2 conservative) multiplying Eq. (2) to
+bracket quotation uncertainty; (2) a mention of a separate paper, "Cost
+Optimisation of Mooring Systems for Offshore Floating Platforms in Deep
+Water" (European Journal of Mechanical Engineering Research, via
+eajournals.org), reportedly reporting cost per mooring line for chain-wire
+-chain vs. chain-polyester-chain systems — not fetched or read this session.
+
+---
+
+**Bottom line for §1:** `USD_PER_ANCHOR` and the polyester `$/m` figure both
+now have a citable basis (§7/§10 and 10a respectively), though neither is a
+clean drop-in replacement — the anchor figure is a derived estimate built on
+unstated assumptions from the source, and the polyester relation is sourced
+from floating-wind shared-mooring cost modeling, not a BC90-specific context.
+`T_MIN_FRACTION` and chain/wire/HMPE per-meter costs remain genuine,
+unresolved gaps.
 
 ---
 
@@ -266,6 +319,12 @@ a published $/m table would resolve it directly).
 - Dawson Group R3/R4/R5 studless mooring chain product pages
   (dawson-group.com) — same source already used in the existing code; diameter
   range and certification list confirmed, MBL table not retrieved.
+- Striani, R.; Jiang, H.; Biroli, M.V.; Shao, Y.; Wang, S. "Review of Floating
+  Offshore Wind Turbines with Shared Mooring Systems." Journal of Marine
+  Science and Engineering 2025, 13(12), 2341.
+  https://doi.org/10.3390/jmse13122341 — read directly (PDF via DTU Orbit,
+  backend.orbit.dtu.dk); Section 5 "Mooring Costs Estimation," Eqs. (1)-(4),
+  p.17, used for §10a's polyester cost-vs-MBL relation.
 
 **Secondary (papers, reports, industry summaries):**
 - Guo et al., "Mechanical behavior of synthetic fiber ropes for mooring
