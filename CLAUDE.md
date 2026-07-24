@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Ask clarification if needed 
+
 ## TBD backlog maintenance
 
 This repo tracks a running agenda backlog at `docs/TBD.md` (a table: Date
