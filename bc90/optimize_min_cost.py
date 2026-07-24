@@ -63,7 +63,7 @@ MBL_BOUNDS_MN = (5.0, 150.0)
 FAIRLEAD_FRACTION_BOUNDS = (0.1, 1.0)
 
 
-def build_mooring_layout(theta_deg: float, mbl_mn: float, fairlead_fraction: float, baseline_geometry):
+def build_mooring_layout(inputs: DesignInputs, theta_deg: float, mbl_mn: float, fairlead_fraction: float, baseline_geometry):
     d_sb_fl_m = fairlead_fraction * inputs.water_depth_m
     r_a_m = d_sb_fl_m / math.tan(math.radians(theta_deg))
     ea_qs = 13.5 * mbl_mn
@@ -87,11 +87,11 @@ def build_mooring_layout(theta_deg: float, mbl_mn: float, fairlead_fraction: flo
     )
 
 
-def evaluate_candidate(theta_deg: float, mbl_mn: float, fairlead_fraction: float, baseline_geometry):
+def evaluate_candidate(inputs: DesignInputs, theta_deg: float, mbl_mn: float, fairlead_fraction: float, baseline_geometry):
     """Returns (cost_usd, detail) -- cost_usd is +inf and detail is None for
     any infeasible or numerically-broken candidate."""
     try:
-        mooring = build_mooring_layout(theta_deg, mbl_mn, fairlead_fraction, baseline_geometry)
+        mooring = build_mooring_layout(inputs, theta_deg, mbl_mn, fairlead_fraction, baseline_geometry)
         g, r, started_passing = shrink_geometry_with_mooring(inputs, baseline_geometry, mooring)
     except (ValueError, ZeroDivisionError):
         return float("inf"), None
@@ -104,7 +104,7 @@ def _clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def coarse_grid_search(baseline_geometry):
+def coarse_grid_search(inputs: DesignInputs, baseline_geometry):
     theta_values = [20, 25, 30, 35, 40, 45, 50]
     mbl_values = [5, 8, 12, 18, 27, 40, 60, 90, 130, 150]
     frac_values = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0]
@@ -115,15 +115,14 @@ def coarse_grid_search(baseline_geometry):
     for theta_deg in theta_values:
         for mbl_mn in mbl_values:
             for frac in frac_values:
-                cost, detail = evaluate_candidate(theta_deg, mbl_mn, frac, baseline_geometry)
+                cost, detail = evaluate_candidate(inputs, theta_deg, mbl_mn, frac, baseline_geometry)
                 done += 1
                 if cost < best[0]:
                     best = (cost, (theta_deg, mbl_mn, frac), detail)
-    print(f"Coarse grid: {done} candidates evaluated.")
-    return best
+    return best, done
 
 
-def pattern_search_refine(start_point, baseline_geometry, start_cost):
+def pattern_search_refine(inputs: DesignInputs, start_point, baseline_geometry, start_cost):
     theta_deg, mbl_mn, frac = start_point
     best_cost = start_cost
     steps = [5.0, 15.0, 0.1]  # theta_deg, mbl_mn, fairlead_fraction
@@ -141,7 +140,7 @@ def pattern_search_refine(start_point, baseline_geometry, start_cost):
                 trial[i] = _clamp(trial[i] + sign * steps[i], *bounds[i])
                 if trial == point:
                     continue
-                cost, _ = evaluate_candidate(trial[0], trial[1], trial[2], baseline_geometry)
+                cost, _ = evaluate_candidate(inputs, trial[0], trial[1], trial[2], baseline_geometry)
                 if cost < best_cost:
                     best_cost = cost
                     point = trial
@@ -149,8 +148,31 @@ def pattern_search_refine(start_point, baseline_geometry, start_cost):
         if not improved:
             steps = [s * 0.5 for s in steps]
 
-    print(f"Pattern search: {iterations} sweeps.")
-    return tuple(point), best_cost
+    return tuple(point), best_cost, iterations
+
+
+def optimize(inputs: DesignInputs, baseline_geometry=None, verbose: bool = False):
+    """Runs the full two-stage search (coarse grid + pattern-search
+    refinement) for the given DesignInputs. Returns
+    (theta_deg, mbl_mn, fairlead_fraction, geometry, BC90Result, MooringLayout).
+    baseline_geometry defaults to size_monopile(inputs).geometry (MP, no
+    mooring) if not supplied."""
+    if baseline_geometry is None:
+        baseline_geometry = size_monopile(inputs).geometry
+
+    (grid_cost, grid_point, grid_detail), n_grid = coarse_grid_search(inputs, baseline_geometry)
+    if verbose:
+        print(f"Coarse grid: {n_grid} candidates evaluated.")
+        theta0, mbl0, frac0 = grid_point
+        print(f"Best grid point: theta={theta0:.1f} deg  MBL={mbl0:.1f} MN  fairlead_frac={frac0:.2f}  cost=${grid_cost:,.0f}")
+
+    final_point, final_cost, n_sweeps = pattern_search_refine(inputs, grid_point, baseline_geometry, grid_cost)
+    if verbose:
+        print(f"Pattern search: {n_sweeps} sweeps.")
+    theta_opt, mbl_opt, frac_opt = final_point
+    _, final_detail = evaluate_candidate(inputs, theta_opt, mbl_opt, frac_opt, baseline_geometry)
+    g, r, mooring = final_detail
+    return theta_opt, mbl_opt, frac_opt, g, r, mooring
 
 
 def main():
@@ -165,15 +187,7 @@ def main():
           f"t={baseline_geometry.wall_thickness_m*1000:.1f} mm  L={baseline_geometry.embedded_length_m:.2f} m  "
           f"steel cost=${mp_result.steel_cost_usd:,.0f}\n")
 
-    grid_cost, grid_point, grid_detail = coarse_grid_search(baseline_geometry)
-    theta0, mbl0, frac0 = grid_point
-    print(f"Best grid point: theta={theta0:.1f} deg  MBL={mbl0:.1f} MN  fairlead_frac={frac0:.2f}  "
-          f"cost=${grid_cost:,.0f}\n")
-
-    final_point, final_cost = pattern_search_refine(grid_point, baseline_geometry, grid_cost)
-    theta_opt, mbl_opt, frac_opt = final_point
-    final_cost_check, final_detail = evaluate_candidate(theta_opt, mbl_opt, frac_opt, baseline_geometry)
-    g, r, mooring = final_detail
+    theta_opt, mbl_opt, frac_opt, g, r, mooring = optimize(inputs, baseline_geometry, verbose=True)
 
     print(f"\n=== Optimum ===")
     print(f"theta={theta_opt:.2f} deg  MBL={mbl_opt:.2f} MN  fairlead={frac_opt:.3f} x depth "
