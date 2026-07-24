@@ -264,6 +264,13 @@ cost_per_m [EUR/m] = 0.0138 * MBL_kN + 11.281 = 13.8 * MBL_MN + 11.281
 | 20 | 287.3 | 310.3 |
 | 25 | 356.3 | 384.8 |
 | 30 | 425.3 | 459.3 |
+| 40 | 563.3 | 608.3 |
+| 50 | 701.3 | 757.4 |
+| 60 | 839.3 | 906.4 |
+| 75 | 1,046.3 | 1,130.0 |
+| 100 | 1,391.3 | 1,502.6 |
+| 125 | 1,736.3 | 1,875.2 |
+| 150 | 2,081.3 | 2,247.8 |
 
 The USD column applies an indicative, unsourced FX conversion for
 order-of-magnitude comparison against the code's USD-denominated constant —
@@ -271,6 +278,20 @@ not a sourced number in its own right. Context caveat: this correlation, like
 most of this database, comes from **floating**-wind shared-mooring cost
 analysis (via a DTOcean+-style model), not a BC90-type bottom-founded
 supplementary-mooring application specifically.
+
+**Extrapolation caveat (rows above MBL=30 MN):** Striani et al. 2025's own
+paper concerns floating-wind shared-mooring systems, whose individual line
+MBLs are not stated in the excerpt read this session but are generally
+consistent with the 5-30 MN range already in the table — this document's own
+§1/scope note puts BC90's own target range at roughly 10-30 MN. The 40-150 MN
+rows are a **linear extrapolation of Eq. (2) far outside any MBL range the
+source paper is known to have validated**, added here only because the tool
+is now being used to explore higher-MBL polyester lines; the formula's
+intercept-plus-slope form has no physical reason to stay linear at this
+scale (e.g. it ignores manufacturing/handling step-changes for
+very-large-diameter rope), so treat the 40+ rows as an order-of-magnitude
+placeholder, weaker in confidence than the already-Primary 5-30 MN rows, not
+as sourced data in their own right.
 
 Companion equations in the same source (not computed into a table here, since
 only the polyester relation was requested — available for a future pass):
