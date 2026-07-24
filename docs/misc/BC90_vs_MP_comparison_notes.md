@@ -2,11 +2,11 @@
 
 Companion to `docs/BC90_METHODOLOGY_REPORT.md`. That document derives the
 methodology; this one records the numbers from actually running it
-(`bc90/compare_mp_vs_bc90.py`) on one representative case, and the
+(`bc90/misc/compare_mp_vs_bc90.py`) on one representative case, and the
 interpretation of what those numbers mean. Regenerate by running:
 
 ```
-python bc90/compare_mp_vs_bc90.py
+python bc90/misc/compare_mp_vs_bc90.py
 ```
 
 Case: 15 MW turbine, 75 m water depth (mid of BC90's 60–90 m target range),
@@ -77,7 +77,7 @@ mechanism, not a bug:
 This is also why buckling utilization *drops* slightly in the shrunk case
 (0.991 → 0.937) even though mooring adds axial compression (per
 `docs/BC90_METHODOLOGY_REPORT.md` Section 5a, confirmed unconditionally by
-`bc90/test_engine_bc90.py::check_buckling_axial_always_worsens`): the smaller
+`bc90/misc/test_engine_bc90.py::check_buckling_axial_always_worsens`): the smaller
 diameter reduces bending moment demand enough to offset the added axial load,
 for this particular geometry. Both effects are real and move in the
 directions the methodology predicts; they just don't move the *same* amount
@@ -87,7 +87,7 @@ constraints simultaneously rather than assuming buckling stays governing.
 ## Caveats (carried from the script/methodology docstrings)
 
 - No real BC90 reference design exists yet; the checks in
-  `bc90/test_engine_bc90.py` are unconditional identities (must hold for any
+  `bc90/misc/test_engine_bc90.py` are unconditional identities (must hold for any
   valid input), not regression numbers against a known-good design.
 - Mooring line EA/MBL values are literature-typical, not a specific
   manufacturer's certified product data.

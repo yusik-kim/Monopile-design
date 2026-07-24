@@ -2,10 +2,10 @@
 Grid sweep over mooring layout (R_a, d_sb_fl), MBL held fixed at 15.0 MN.
 Run directly:
 
-    python bc90/optimize_mooring_grid.py
+    python bc90/misc/optimize_mooring_grid.py
 
 Site: 15 MW turbine, 75 m water depth, same environmental inputs as
-bc90/compare_mp_vs_bc90.py (sand soil, Hs=5.5 m, Tp=9.5 s, current=0.4 m/s) --
+bc90/misc/compare_mp_vs_bc90.py (sand soil, Hs=5.5 m, Tp=9.5 s, current=0.4 m/s) --
 per "Optimization test.md", only turbine/depth were restated there.
 
 Grid: R_a in [0.5, 1.5] x water_depth (10 points), d_sb_fl in [0.3, 1.0] x
@@ -37,7 +37,7 @@ import csv
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine import DesignInputs, SoilProfile, size_monopile
 from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring, GAMMA_ML_ULS

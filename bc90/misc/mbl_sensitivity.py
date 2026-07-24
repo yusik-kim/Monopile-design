@@ -4,7 +4,7 @@ water depth, fairlead held at MSL (d_sb_fl_m = water_depth_m), mooring line
 angle theta = 40 deg (=> R_a fixed by geometry, independent of MBL), 15 MW
 turbine, sand soil, same sea state. Run directly:
 
-    python bc90/mbl_sensitivity.py
+    python bc90/misc/mbl_sensitivity.py
 
 MBL swept over [5, 10, 15, 30, 60, 100, 200, 400, 600, 1000] MN. For each
 value: EA_quasi_static=13.5xMBL, EA_dynamic=26.5xMBL (same literature-typical
@@ -16,7 +16,7 @@ fixed) at each MBL.
 
 No cost columns -- explicitly out of scope for this sweep (cost data is
 sparse/unsourced above the ~MBL=15-30 MN range this repo's cost research
-actually covered, see docs/mooring_line_database.md Section 10a).
+actually covered, see docs/misc/mooring_line_database.md Section 10a).
 
 delta_fl,0 (Section 4c) is the UNRESTRAINED fairlead deflection under
 thrust+wave loads if there were no mooring line at all -- it depends only on
@@ -29,7 +29,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine import DesignInputs, SoilProfile, size_monopile
 from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring, GAMMA_ML_ULS
@@ -91,7 +91,7 @@ def main():
             # the net mudline moment used by _fls_check goes non-positive,
             # which math.log10() can't handle. A real edge case of this
             # heuristic at MBL values far outside anything sourced in
-            # docs/mooring_line_database.md -- reported, not silently skipped.
+            # docs/misc/mooring_line_database.md -- reported, not silently skipped.
             print(f"{mbl_mn:8.0f}   ERROR: shrink loop crashed ({exc}) -- likely drove D below where "
                   f"the net mudline moment stays positive; not a valid result at this MBL.")
             continue

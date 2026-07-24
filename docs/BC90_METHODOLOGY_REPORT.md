@@ -9,8 +9,8 @@ line model.pdf` (single-line, 2D, elevation-view only).
 `bc90/mooring.py` (single-line and 3-line stiffness, flexibility kernel,
 redundant-force solve, NFA correction) and `bc90/engine_bc90.py`
 (`evaluate_bc90`, the BC90 analog of `engine.py`'s `evaluate_monopile`), plus
-`bc90/compare_mp_vs_bc90.py`, `bc90/optimize_mooring_grid.py`,
-`bc90/test_mooring.py`, `bc90/test_engine_bc90.py`. These import `engine.py`'s
+`bc90/misc/compare_mp_vs_bc90.py`, `bc90/misc/optimize_mooring_grid.py`,
+`bc90/misc/test_mooring.py`, `bc90/misc/test_engine_bc90.py`. These import `engine.py`'s
 turbine/load/soil/ULS/SLS/FLS/buckling functions unchanged. **`engine.py` and
 `app.py` themselves are not modified.** Equations below are cross-checked
 against `bc90/*.py` and match it; where noted, the code implements a specific
@@ -145,12 +145,12 @@ only under "CC1 + redundant (3-line) system" — not under CC2 or
 non-redundancy, either of which would require 2.04–3.0. **The undecided item
 is which consequence class/redundancy classification applies to a BC90
 mooring assist** — tied to the §5 "redundant assist vs. load-bearing"
-philosophy question, not yet made. Source: `docs/mooring_line_database.md` §8
+philosophy question, not yet made. Source: `docs/misc/mooring_line_database.md` §8
 (DNV-OS-E301 read directly).
 
 **`T_MIN_FRACTION` — genuine unsourced gap.** DNV-OS-E301 requires lines not
 to go slack (§D801) but gives no numeric minimum-tension fraction of
-`T0`/`MBL`; none was found elsewhere either (`docs/mooring_line_database.md`
+`T0`/`MBL`; none was found elsewhere either (`docs/misc/mooring_line_database.md`
 §1, §8). Remains a placeholder.
 
 **`USD_PER_M_MOORING_LINE` — sourced for polyester, current constant not
@@ -164,7 +164,7 @@ correlation comes from floating-wind shared-mooring cost modeling (a
 DTOcean+-style model), not a BC90-specific bottom-founded application.
 Recommend replacing the flat constant with this formula in a future code
 change (out of scope here — methodology only). Source:
-`docs/mooring_line_database.md` §2, §10a.
+`docs/misc/mooring_line_database.md` §2, §10a.
 
 **`USD_PER_ANCHOR` — order-of-magnitude consistent, but derived not primary.**
 BVG Associates' aggregate 1 GW floating-wind anchor cost (≈£35M) implies
@@ -172,7 +172,7 @@ BVG Associates' aggregate 1 GW floating-wind anchor cost (≈£35M) implies
 anchors/turbine, ~1.27 USD/GBP) — close to $250,000, but priced for a
 floating-wind drag anchor sized for full station-keeping, not a BC90 assist
 anchor. Treat the closeness as coincidental. Source:
-`docs/mooring_line_database.md` §7, §10.
+`docs/misc/mooring_line_database.md` §7, §10.
 
 ---
 
@@ -276,7 +276,7 @@ The group stiffness does not cancel (0×) or triple (3×); it is exactly
 1.5× the single-line horizontal stiffness, for any heading. This lets the
 group be treated as one scalar spring in §4c/§7, consistent with the
 baseline's own single-vertical-plane load treatment. Verified numerically in
-`bc90/test_mooring.py::check_three_line_isotropy` (brute-force summation over
+`bc90/misc/test_mooring.py::check_three_line_isotropy` (brute-force summation over
 5 headings, matched to 1e-12).
 
 **Not isotropic: individual line tension.** For a given heading, tension
@@ -321,7 +321,7 @@ f_aa·F_ml`, `F_ml = K_ml,net·disp_fl`):
 ```
 F_ml = K_ml,net * δ_fl,0 / (1 + K_ml,net * f_aa)
 ```
-Limits verified in `bc90/test_mooring.py::check_mooring_reaction_limits`:
+Limits verified in `bc90/misc/test_mooring.py::check_mooring_reaction_limits`:
 `F_ml → 0` as `K_ml,net → 0`; `F_ml → δ_fl,0/f_aa` (rigid-prop reaction) as
 `K_ml,net → ∞`.
 
@@ -418,10 +418,10 @@ axial_load_estimate_BC90 = axial_load_estimate_baseline + F_ml,vertical
 This raises `σ_axial`, hence `σ_vM` in the buckling check — **buckling
 utilization rises because of mooring, even as bending/shear utilization
 (via `M_char_net`/`V_char_net`) falls.** Verified unconditionally in
-`bc90/test_engine_bc90.py::check_buckling_axial_always_worsens` (axial load
+`bc90/misc/test_engine_bc90.py::check_buckling_axial_always_worsens` (axial load
 strictly increases for any valid mooring layout). Any BC90 sizing must check
 both directions — mooring is not a free win for every check simultaneously.
-See `docs/BC90_vs_MP_comparison_notes.md` for a worked case where this
+See `docs/misc/BC90_vs_MP_comparison_notes.md` for a worked case where this
 trade-off nonetheless nets out favorably for buckling at a smaller diameter.
 
 **Fairlead attachment** (padeye/bracket) is a local stress concentration and
@@ -476,9 +476,9 @@ f0 = (1/2π) * sqrt(K_eq_BC90_in_N_per_m / m_eff)
 where `f_hh` is the baseline's unchanged hub-height flexibility
 (`cantilever_flexibility + 1/K_L + h²/K_R`), `f_aa = f(a,a)`, `f_ha = f(a,h)`.
 `f_total < f_hh` always (mooring stiffens, raises `f0`) — verified
-unconditionally in `bc90/test_engine_bc90.py::check_nfa_always_stiffens`.
+unconditionally in `bc90/misc/test_engine_bc90.py::check_nfa_always_stiffens`.
 
-**Exact limits** (`bc90/test_mooring.py`):
+**Exact limits** (`bc90/misc/test_mooring.py`):
 - **Rigid mooring** (`K_ml,net → ∞`): `f_total → f_hh - (f_ha)²/f_aa` — the
   classical flexibility of a cantilever pinned at fairlead height.
 - **Fairlead at mudline** (`a → 0`): `f_aa = f_ha = 1/K_L`, and `f_total`
@@ -502,7 +502,7 @@ the NFA correction above, while §4c/§5/§9a use the quasi-static
 `net_horizontal_stiffness`. The remaining gap is data, not code: a chosen
 line material's actual dynamic-vs-quasi-static EA ratio (`docs/
 mooring_line_database.md` §2 gives ≈13×MBL quasi-static / ≈26.5×MBL dynamic
-for polyester, used as the working default in `bc90/optimize_mooring_grid.py`).
+for polyester, used as the working default in `bc90/misc/optimize_mooring_grid.py`).
 
 **Not checked here:** whether adding an elastic support partway up the
 cantilever introduces an additional low-frequency vibration mode beyond the
@@ -520,14 +520,14 @@ classical first fore-aft mode.
 ```
 Since `M_char_net < M_char`, `utilization_FLS` should drop — but §5a found
 buckling utilization *rises*. **Which check governs is case-dependent, not
-assumable** (`docs/BC90_vs_MP_comparison_notes.md`'s representative case shows
+assumable** (`docs/misc/BC90_vs_MP_comparison_notes.md`'s representative case shows
 the governing constraint flipping from Buckling to Slack once the pile is
 shrunk, illustrating the same point for a different check pair).
 
 **Entirely unmodeled: mooring line/fairlead-connection fatigue.** Mooring
 lines see millions of tension cycles over the design life (wave-frequency,
 not just 1P/3P), governed by a T-N curve (tension range vs. cycles), not the
-shell's S-N curve. `docs/mooring_line_database.md` §2/§5/§6 gives DNV-OS-E301
+shell's S-N curve. `docs/misc/mooring_line_database.md` §2/§5/§6 gives DNV-OS-E301
 T-N parameters for polyester (`a_D=0.259, m=13.46`, `γ_F=60`), wire rope, and
 chain — usable once a line material is selected, but not implemented in
 `bc90/*.py`. This is a distinct failure mode with no baseline equivalent.
@@ -577,7 +577,7 @@ calibrated values:
   `K_ml = EA/L_ml` from a chosen line's `EA` and the resulting geometry,
   rather than picking `K_ml` freestanding.
 - **`T0` (pretension).** `pretension_fraction` defaults to 0.15 (15% MBL).
-  `docs/mooring_line_database.md` §9: DNV-OS-E301 §B406 requires pretension be
+  `docs/misc/mooring_line_database.md` §9: DNV-OS-E301 §B406 requires pretension be
   applied for the operating state considered but specifies **no numeric
   fraction**; 10–20% MBL (sometimes cited as wide as 10–30%) is a recurring
   floating-wind design convention, not a DNV clause — the code's docstring
@@ -603,14 +603,14 @@ calibrated values:
 
 **No dedicated BC90 physical reference design exists.** Available evidence:
 
-- `bc90/test_mooring.py`, `bc90/test_engine_bc90.py`: exact closed-form
+- `bc90/misc/test_mooring.py`, `bc90/misc/test_engine_bc90.py`: exact closed-form
   identities the methodology derives (3-line isotropy; flexibility-kernel
   symmetry and its reduction to the baseline formula at `a=b=h`;
   rigid-mooring and fairlead-at-mudline NFA limits; `F_ml` limits at
   `K_ml,net→0,∞`; buckling axial load strictly worsens; NFA `f0` strictly
   rises) — unconditional properties, not regression numbers against a known
   design, since none exists.
-- `docs/BC90_vs_MP_comparison_notes.md`: one representative run (15 MW,
+- `docs/misc/BC90_vs_MP_comparison_notes.md`: one representative run (15 MW,
   75 m depth) — BC90 achieves ~9% steel mass reduction but ~10% higher total
   CAPEX (mooring hardware cost exceeds the steel saving in this case), with
   the governing constraint flipping from Buckling (MP) to Slack (BC90 shrunk).
@@ -709,7 +709,7 @@ In order of expected impact:
   tension-leg-platform literature; no single canonical citation located, so
   treated as derived from the source PDF's own relations (§4a).
 - DNV-OS-E301 ("Position Mooring," Oct 2008) — read directly in
-  `docs/mooring_line_database.md` (§2, §5, §6, §8, §9): ULS/ALS partial
+  `docs/misc/mooring_line_database.md` (§2, §5, §6, §8, §9): ULS/ALS partial
   factors (Tables D1/D2), consequence classes (§D101/§D203), polyester T-N
   fatigue parameters (Table F3), wire/chain Young's modulus and S-N curves
   (§B106, Table F1). Used for §1, §5, §8, §9a.
@@ -722,7 +722,7 @@ In order of expected impact:
 - Baseline `docs/METHODOLOGY_REPORT.md` §4 (Hetenyi closed-form) and §7
   (virtual-work cantilever flexibility) — the §4c/§7 redundant-force
   derivation here is a direct, limit-checked extension of both.
-- `docs/mooring_line_database.md` — full sourced mooring-line/anchor
+- `docs/misc/mooring_line_database.md` — full sourced mooring-line/anchor
   literature review (polyester, HMPE, nylon, wire, chain, anchors, DNV
-  factors); `docs/BC90_vs_MP_comparison_notes.md` — one representative
+  factors); `docs/misc/BC90_vs_MP_comparison_notes.md` — one representative
   MP-vs-BC90 run (§10).

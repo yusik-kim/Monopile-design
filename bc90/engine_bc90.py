@@ -90,7 +90,7 @@ USD_PER_M_MOORING_LINE = 500.0    # mooring line unit cost, fallback placeholder
 USD_PER_ANCHOR = 250_000.0        # anchor unit cost, placeholder (does not model holding-capacity dependence)
 
 # Polyester mooring line cost vs. MBL, sourced 2026-07-24 (docs/
-# mooring_line_database.md Section 10a): Striani et al. 2025 (J. Mar. Sci.
+# docs/misc/mooring_line_database.md Section 10a): Striani et al. 2025 (J. Mar. Sci.
 # Eng. 13(12), 2341), Eq. (2): C = (0.0138*MBL_kN + 11.281)*L_m [EUR], i.e.
 # cost/m depends only on MBL (L_m cancels). Replaces the flat
 # USD_PER_M_MOORING_LINE placeholder above -- that constant significantly

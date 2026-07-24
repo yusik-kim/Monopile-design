@@ -4,7 +4,7 @@ depth] at the 90 m site (same site as compare_mp_vs_bc90_90m.py /
 mbl_sensitivity.py: 15 MW turbine, sand phi=34 deg, Hs=5.5 m, Tp=9.5 s,
 current=0.4 m/s). Run directly:
 
-    python bc90/optimize_min_cost.py
+    python bc90/misc/optimize_min_cost.py
 
 Pile geometry (D, t) is co-optimized at every candidate via
 shrink_geometry_with_mooring, starting from the MP (no-mooring) baseline --
@@ -48,7 +48,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine import DesignInputs, SoilProfile, size_monopile
 from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring, GAMMA_ML_ULS

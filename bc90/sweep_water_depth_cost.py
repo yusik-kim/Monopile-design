@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine import DesignInputs, SoilProfile, size_monopile
-from bc90.optimize_min_cost import optimize
+from bc90.misc.optimize_min_cost import optimize
 
 WATER_DEPTHS_M = list(range(20, 151, 10))  # 20, 30, ..., 150
 

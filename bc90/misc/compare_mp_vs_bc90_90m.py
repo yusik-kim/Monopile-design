@@ -2,7 +2,7 @@
 Updated MP (baseline, no mooring) vs. BC90 (taut-mooring-assisted) comparison
 at the deep end of BC90's target range. Run directly:
 
-    python bc90/compare_mp_vs_bc90_90m.py
+    python bc90/misc/compare_mp_vs_bc90_90m.py
 
 Fixed per this test's brief (vs. compare_mp_vs_bc90.py's more general 75 m
 case):
@@ -35,7 +35,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine import DesignInputs, SoilProfile, size_monopile
 from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring, GAMMA_ML_ULS

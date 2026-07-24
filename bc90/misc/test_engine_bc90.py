@@ -1,9 +1,9 @@
 """
 Light, dependency-free sanity check for bc90/engine_bc90.py. Run directly:
 
-    python bc90/test_engine_bc90.py
+    python bc90/misc/test_engine_bc90.py
 
-No pytest/GUI required, matching test_engine.py / bc90/test_mooring.py.
+No pytest/GUI required, matching test_engine.py / bc90/misc/test_mooring.py.
 These checks are the properties docs/BC90_METHODOLOGY_REPORT.md derives as
 UNCONDITIONAL (must hold for any valid geometry/mooring combination, not just
 this one) -- they are not regression numbers against a specific reference
@@ -14,7 +14,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine import DesignInputs, SoilProfile, MonopileGeometry, size_monopile, _natural_frequency, \
     _axial_load_estimate, _shell_buckling_check, turbine_from_capacity, _pile_section_properties, \

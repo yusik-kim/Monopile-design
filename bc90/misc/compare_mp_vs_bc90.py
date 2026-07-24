@@ -2,7 +2,7 @@
 MP (baseline, no mooring) vs. BC90 (taut-mooring-assisted) comparison, same
 environmental inputs. Run directly:
 
-    python bc90/compare_mp_vs_bc90.py
+    python bc90/misc/compare_mp_vs_bc90.py
 
 Site: a general (not extreme) representative BC90-range case -- 15 MW
 turbine, 75 m water depth (mid of the 60-90 m target range), sand soil,
@@ -40,7 +40,7 @@ References used for the mooring line data below:
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from engine import DesignInputs, SoilProfile, size_monopile
 from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring, GAMMA_ML_ULS

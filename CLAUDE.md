@@ -4,13 +4,13 @@ Ask clarification if needed
 
 ## TBD backlog maintenance
 
-This repo tracks a running agenda backlog at `docs/TBD.md` (a table: Date
+This repo tracks a running agenda backlog at `docs/misc/TBD.md` (a table: Date
 Added / Item / Status / Status Updated). Items are added via `/TBD <item>`.
 
 Status values: `open` / `discussed` (no implementation needed) / `implemented`
 / `obsoleted` / `archived`.
 
-**Proactively keep `docs/TBD.md` current without waiting to be asked.**
+**Proactively keep `docs/misc/TBD.md` current without waiting to be asked.**
 Whenever, during a session, a backlog item is clearly resolved — you
 implement something that matches an open item, a conversation thoroughly
 discusses an item and concludes no implementation is needed, or a later

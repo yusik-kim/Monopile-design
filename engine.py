@@ -26,7 +26,7 @@ Key simplifications (all concept-stage, not detailed/FEED-grade):
   _shell_buckling_check for why, and for what this replaced.
 Each simplification is called out at its function. Treat outputs as a
 starting point for detailed design / PISA-based or FE validation, not a
-substitute for it -- see docs/Monopile_Initial_Design_Method_Summary.md and
+substitute for it -- see docs/misc/Monopile_Initial_Design_Method_Summary.md and
 docs/METHODOLOGY_REPORT.md for the full equations/constants/assumptions, and
 docs/method_update_log.md for the dated history of how they were chosen.
 """

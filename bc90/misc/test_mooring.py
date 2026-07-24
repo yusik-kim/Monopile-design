@@ -1,7 +1,7 @@
 """
 Light, dependency-free sanity check for bc90/mooring.py. Run directly:
 
-    python bc90/test_mooring.py
+    python bc90/misc/test_mooring.py
 
 No pytest/GUI required -- prints each check and raises AssertionError on
 failure, matching the convention of the baseline's own test_engine.py.
@@ -14,7 +14,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from bc90.mooring import (
     MooringLayout,
