@@ -855,6 +855,14 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
         # turns out to be NFA, the result leans on an unverified formula more
         # than a ULS/FLS/Buckling/SLS-governed one would. Flagged in notes
         # below when it applies, rather than silently accepted.
+        #
+        # This is a FIXED-ORDER greedy search (D fully, then t fully), not a
+        # joint optimum -- verified 2026-07-24 (docs/method_update_log.md):
+        # for most cases tried, reversing the order or searching jointly
+        # lands on the identical geometry (t never has a legal move at any
+        # point along the path), but at least one counter-example (22 MW/
+        # 34 m) found the reverse order ~2% lighter. Good enough for concept
+        # screening; not provably the smallest passing geometry.
         while True:
             smaller_geometry = _clamped(MonopileGeometry(
                 max(geometry.diameter_m - d_step_m, 0.1), geometry.wall_thickness_m, geometry.embedded_length_m

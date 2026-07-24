@@ -28,8 +28,13 @@ superseded calibrations), see `method_update_log.md`.
 5. Otherwise, adjust diameter or wall thickness per the step-wise rule in §9
    and go back to 3. (Embedded length is *not* an independently-adjusted
    lever here — see the embedment note in §9.)
-6. Stop at convergence, at a runaway guard (diameter ≥ 3× the initial guess),
-   or after 500 iterations — whichever comes first.
+6. Stop growing at convergence, at a runaway guard (diameter ≥ 3× the initial
+   guess), or after 500 iterations — whichever comes first.
+7. **Post-convergence cleanup** (only runs if step 6 converged): greedily
+   shrink diameter step-by-step while every check still passes, holding
+   thickness fixed; then, at that smaller diameter, greedily shrink thickness
+   the same way. Closes the gap between "first geometry that happened to
+   pass" and "smallest geometry that still passes" — see §9.
 
 All internal units are SI-with-MN: **length in m, force in MN, moment in
 MN·m, stress in MPa (≡ MN/m²), Young's modulus in MPa**. This makes
@@ -657,7 +662,7 @@ wind/rotor-speed distribution, or rainflow-counted time series) — see
 `method_update_log.md` for the calibration history. **Treat it as temporary,
 to be recalibrated once real turbine fatigue load data is available.** This
 remains the single most influential unvalidated number in the fatigue check
-whenever FLS governs (currently 5/15 MW; 22 MW is buckling-governed — §10).
+whenever FLS governs (currently all three of 5/15/22 MW at their tested sites — §10).
 
 Cycle counting assumes one stress cycle per rotor revolution at the average
 of `rpm_min`/`rpm_max`, scaled by a `duty_factor` (default 0.9) — real
@@ -721,7 +726,15 @@ per the following priority:
 3. **SLS failing** → increase `D` (stiffens the foundation, reduces mudline
    rotation).
 4. **NFA failing high** (`f0` above the band, uncommon for monopiles) →
-   decrease `D`.
+   decrease `D`, but only if doing so wouldn't itself push ULS, FLS, or
+   Buckling above 1.0 at the current thickness. If it would, stop the growth
+   loop instead of spiraling into a shrink-`D`/grow-`t` tug-of-war that lands
+   on an unrealistic `D/t` ratio (observed as low as ~4 for some turbine
+   sizes before this guard was added, 2026-07-23 — see
+   `method_update_log.md`). If the stop is specifically this too-stiff case,
+   the geometry is **accepted as converged with a warning note** rather than
+   flagged non-convergent — stiff-side `f0` exceedance (above 3P minimum) is
+   not normally safety-critical for monopiles, unlike the too-soft case.
 
 After each adjustment, `L/D` is clamped to `[3, 12]` (configurable in
 `DesignInputs`). **`D/t` is *not* clamped** — wall thickness is free to grow
@@ -767,28 +780,61 @@ diameter reaches **3× the initial guess** (runaway guard — appends a
 non-convergence note explaining that a check is likely dominated by an
 input outside pile geometry, e.g. tower stiffness), OR 500 iterations.
 
-**Post-convergence thickness shrink:** the growth loop above is
-**one-directional** — it only ever adds material and stops at the first
-geometry that passes, starting from `t0 = D0/110`. If that initial guess
-already satisfies every check, the loop runs **zero** iterations and reports
-`t0` as "the" answer, regardless of how much thinner a wall could also pass.
-Once the growth loop converges, `size_monopile` steps wall thickness back
-**down** by `t_step` — re-evaluating all five checks each step — until
-either a step would fail a check (keep the last passing thickness) or a
-1mm absolute floor is reached. This finds the true minimum-material wall
-thickness rather than just the first one the growth loop happened to land
-on. **Diameter is deliberately not shrunk** by this step — it also feeds the
-extreme-load calculation and NFA, and NFA is still pending its own
-verification (see `method_update_log.md`).
+**Post-convergence cleanup (diameter, then thickness):** the growth loop
+above is **one-directional** — it only ever adds material (except for the
+bounded NFA-too-stiff decrease above) and stops at the *first* geometry that
+passes, starting from `D0`/`t0 = D0/110`. If the initial guess already
+satisfies every check, the growth loop runs **zero** iterations and would
+otherwise report the raw starting guess as "the" answer, regardless of how
+much smaller a pile could also pass. Once the growth loop converges,
+`size_monopile` runs two further greedy shrink passes, **in this order**:
 
-**For most turbine sizes, the growth loop for diameter also runs zero
-iterations** — `_initial_geometry`'s starting guess for `D` already
-satisfies every check for most turbine sizes tested, so `D` (and therefore
-`L`, via the fixed `L/D=5` ratio) never moves from the initial guess either.
-A converged result can therefore be almost entirely the raw starting guess
-rather than something the checks actually drove — worth keeping in mind
-when reading any single result from this tool in isolation (see also §11
-item 22).
+1. **Shrink `D`** step-by-step (holding `t` fixed at whatever the growth loop
+   converged to), re-evaluating all five checks each step, until a step would
+   fail a check (keep the last passing diameter) or the 0.1 m floor is
+   reached. If the pass stops with **NFA as the governing constraint**, a
+   note is appended flagging that this leans on NFA's not-yet-independently
+   -verified `f0` formula (see `method_update_log.md`) more than a stop
+   governed by ULS/FLS/Buckling/SLS would.
+2. **Shrink `t`** step-by-step at that now-smaller `D` (holding `D` fixed),
+   the same way, down to a 1 mm absolute floor.
+
+Diameter is shrunk **first**, because it is the lever most likely to reveal
+real headroom (e.g. shell buckling capacity typically *improves* as `D`
+shrinks at fixed `t`, since `D/t` drops), and because `bc90/engine_bc90.py`'s
+`shrink_geometry_with_mooring` already established this same
+diameter-then-thickness pattern for the BC90 extension (§0 there). **This is
+a fixed, sequential, single-order greedy search, not a joint optimum**: it
+finds *a* smaller passing geometry, not provably *the* smallest. Verified by
+direct comparison (2026-07-24, not yet reflected in a permanent script): for
+most cases tried, the reverse order (`t` then `D`) or a step-by-step joint
+search (evaluating both single-step moves each iteration, keeping whichever
+one passes and reduces mass more) land on the identical geometry, because
+whichever check is tightest at each point along the path also happens to be
+one that thinning `t` makes worse — but at least one counter-example was
+found (22 MW/34 m case) where the reverse order finds a ~2% lighter pile,
+confirming the fixed order is not guaranteed optimal.
+
+Diameter was previously *not* shrunk here at all (only thickness), out of
+caution that shrinking `D` would lean too heavily on NFA's unverified `f0`
+formula whenever NFA ended up governing at the smaller diameter — that
+restriction was removed 2026-07-23 (re-added again 2026-07-24 after a brief
+revert; see `method_update_log.md`) in favor of the explicit
+governing-constraint warning note described above, which flags exactly that
+situation instead of avoiding it altogether.
+
+**The growth loop for diameter often runs zero iterations** —
+`_initial_geometry`'s starting guess for `D` frequently already satisfies
+every check on its own, so `D` (and `L`, via the fixed `L/D=5` ratio) never
+moves *during the growth loop*. This no longer means the **final** result is
+the raw starting guess, though: the post-convergence diameter-shrink pass
+above runs regardless, and routinely moves `D` well below the initial guess
+once the growth loop has converged (e.g. a 15 MW turbine's `D0=10.0 m`
+anchor point shrinking to 8.95 m at 90 m water depth — an ~11% diameter, ~9%
+mass reduction found entirely in post-convergence cleanup, not the growth
+loop). Worth keeping in mind when reading a result: the growth loop finding
+zero iterations for `D` says nothing about whether the *final* `D` differs
+from the initial guess (see also §11 item 22).
 
 ---
 
@@ -803,11 +849,14 @@ with a **real reference monopile design** to compare against (5/15/22 MW).
 |---|---|---|---|
 | 5 MW, 20 m depth, sand (φ=36°) | D=6.00 m, t=64.5 mm, L=30.0 m (L/D=5.0, D/t=93.0) | **FLS** (margin 0.063) | Diameter matches the real OC3 monopile (6 m) exactly; thickness within ~8% of the real 60 mm |
 | 15 MW, 35 m depth, sand (φ=35°) | D=10.00 m, t=106.9 mm, L=50.0 m (L/D=5.0, D/t=93.5) | **FLS** (margin 0.047) | Diameter matches the real IEA 15 MW reference (10 m) exactly; D/t≈93 sits close to the 5/22 MW pattern (§2) |
-| 22 MW, 34 m depth, sand (φ=36°) | D=12.80 m, t=110.4 mm, L=64.0 m (L/D=5.0, D/t=116.0) | **Buckling** (margin 0.016) | Real IEA 22 MW design caps diameter at 10 m (an explicit optimizer bound not replicated here); thickness within ~10% of the real 100 mm. At the *real* reference geometry (D=10m, t=100mm), buckling utilization independently comes out to 1.012 — within 2% of governing exactly |
+| 22 MW, 34 m depth, sand (φ=36°) | D=10.10 m, t=114.4 mm, L=64.0 m (L/D=6.34, D/t=88.3) | **FLS** (margin 0.024) | Diameter now within 1% of the real IEA 22 MW reference (10 m) — closer than the pre-2026-07-23 result (D=12.80 m) shown in earlier versions of this table, once the post-convergence diameter-shrink pass (§9) found headroom the growth loop's D=12.80 m stopping point had left on the table. At the *real* reference geometry (D=10m, t=100mm), buckling utilization independently comes out to 1.012 — within 2% of governing exactly |
 
-**FLS governs 5/15 MW; 22 MW is buckling-governed** — matching the industry
-pattern that fatigue typically drives monopile sizing for turbines below
-~15MW, while larger turbines are governed by other checks.
+**FLS governs all three of 5/15/22 MW** at these specific sites/turbines —
+consistent with the industry pattern that fatigue typically drives monopile
+sizing, though the pre-diameter-shrink 22 MW result (Buckling-governed,
+D=12.80 m) is also plausible for larger turbines depending on site
+conditions; the two aren't a contradiction, just two different local optima
+this greedy search can land on (§9).
 
 Both prior real bugs in this model (an under-calibrated tower-stiffness
 regression, and a natural-frequency band-inversion for wide-rotor-speed
@@ -852,11 +901,11 @@ review before results are used beyond early screening:
 15. Fatigue cycle count uses one cycle per rotor revolution at the min/max rpm average, not a wind-speed distribution.
 16. Single DNV-RP-C203-style S-N curve (`log10(a)=12.16`, `m=3`) applied structure-wide, not joint-specific.
 17. `USD_PER_T_STEEL = 2200` — a placeholder, not sourced from a specific quote.
-18. Local shell buckling (`_shell_buckling_check`, §5a) — DNV-RP-C202 unstiffened cylinder, panel length assumed equal to the full exposed above-mudline shaft (no ring stiffeners). Often the governing check (5/15/22 MW all converge buckling-governed or near it). **Global (Euler) column buckling is not implemented** — axial load is small relative to elastic critical load, judged unlikely to govern for this structure type.
+18. Local shell buckling (`_shell_buckling_check`, §5a) — DNV-RP-C202 unstiffened cylinder, panel length assumed equal to the full exposed above-mudline shaft (no ring stiffeners). A frequent near-governing check even where it doesn't formally govern (post-diameter-shrink 22 MW: FLS=0.976 governs, Buckling=0.766 close behind). **Global (Euler) column buckling is not implemented** — axial load is small relative to elastic critical load, judged unlikely to govern for this structure type.
 19. `sigma_vm` in `_uls_check` omits axial stress (self-weight/pretension) and hoop/radial stress (external hydrostatic pressure) — only bending + shear are combined (§5).
-20. The post-convergence thickness-shrink step (§9) only shrinks wall thickness, not diameter — a design could still be carrying more diameter than strictly necessary. NFA is explicitly excluded from driving any shrink, pending its own verification (§10).
+20. Post-convergence cleanup (§9) shrinks diameter, then thickness, but as two separate fixed-order single-axis greedy passes, not a joint search — the result is *a* smaller passing geometry, not provably *the* smallest (verified counter-example: reversing the order finds a ~2% lighter pile in at least one tested case). NFA is not excluded from the diameter-shrink pass, but is flagged with a warning note whenever it ends up governing at the smaller diameter, since its `f0` formula is not yet independently verified (§10).
 21. **Embedded length `L` has no independent design driver** — it's a fixed `L/D=5` rule-of-thumb ratio at the initial guess, only ever changing as a passive side effect of the `L/D∈[3,12]` clamp when `D` changes for other reasons. This isn't only a loop-logic gap: the closed-form `K_L`/`K_R` stiffness terms driving SLS/NFA have **zero dependence on `L` for clay** and only a weak one for sand (§9), so even a wired-up "SLS failing → grow L" branch wouldn't fix the underlying issue for clay. No check evaluates ultimate lateral/moment soil **capacity** (e.g. Broms' method) to actually size embedment against load; `beta×L<2.5` (§4) is only a stiffness-formula validity warning, not a corrective design action. **Future work:** implement that capacity check (§9).
-22. **For most turbine sizes, the growth loop runs zero iterations** — `_initial_geometry`'s starting guess already satisfies ULS/SLS/NFA/FLS/Buckling, so `D` (and therefore `L`, via the fixed `L/D=5` ratio) never moves from the initial guess at all. A result can look like a converged, optimized design while actually being almost entirely the raw starting guess (§9).
+22. **For most turbine sizes, the *growth loop* runs zero iterations for D** — `_initial_geometry`'s starting guess already satisfies ULS/SLS/NFA/FLS/Buckling, so `D` (and therefore `L`, via the fixed `L/D=5` ratio) never moves *during growth*. This no longer means the final result is the raw starting guess: the post-convergence diameter-shrink pass (§9) runs regardless and often moves `D` substantially below the initial guess (e.g. 15 MW/90 m: D0=10.0 m shrinks to 8.95 m, ~9% less steel, entirely in cleanup, not growth).
 23. `D/t` bounds (default `[80, 160]`) are advisory, not a hard search limit (§9) — the converged geometry can fall outside them, flagged with a manufacturability warning note rather than being blocked from getting there.
 24. The 15 MW mudline wall-thickness reference figure (§2) is not table-sourced; an earlier image-derived chart estimate is doubted based on this engine's own converged D/t pattern (§2, §10).
 
