@@ -1,0 +1,233 @@
+"""
+Minimize BC90 total CAPEX over [mooring line angle theta, MBL, fairlead
+depth] at the 90 m site (same site as compare_mp_vs_bc90_90m.py /
+mbl_sensitivity.py: 15 MW turbine, sand phi=34 deg, Hs=5.5 m, Tp=9.5 s,
+current=0.4 m/s). Run directly:
+
+    python bc90/misc/optimize_min_cost.py
+
+Pile geometry (D, t) is co-optimized at every candidate via
+shrink_geometry_with_mooring, starting from the MP (no-mooring) baseline --
+cost is total CAPEX (steel + mooring line + anchors, BC90Result.total_capex_usd),
+using the sourced MBL-dependent polyester line cost (docs/
+mooring_line_database.md Section 10a).
+
+Bounds (per 2026-07-24 request, MBL upper bound extended 2026-07-26):
+  - theta (mooring line angle from horizontal): 20-50 deg
+  - MBL: 5-300 MN -- matches the cost table's tabulated range (docs/
+    mooring_line_database.md Section 10a, extended from 150 to 300 MN on
+    2026-07-26 to check whether 150 was a genuine physical/cost limit or
+    just an artifact of where the table previously stopped -- see that
+    doc's extrapolation caveat: this is a linear extrapolation of a
+    floating-wind cost correlation, not sourced data, at this range).
+    Higher MBL still has no sourced/extrapolated cost, so is out of scope
+    for a COST objective specifically (see mbl_sensitivity.py for the
+    wider, cost-blind MBL=1000 MN sweep).
+
+    **NO MANUFACTURING PRECEDENT ABOVE ~30 MN (2026-07-26 research, see
+    mooring_line_database.md "Physical-precedent caveat"):** the largest
+    polyester mooring rope ever built and installed is ~2,578 t MBL
+    (~25.3 MN, Goliat FPSO, Lankhorst Gama 98) -- nothing near 150 MN, let
+    alone 300 MN, has ever been manufactured for a single line. This
+    document's own scope note (mooring_line_database.md intro) already put
+    BC90's real target at 10-30 MN. The 300 MN bound is kept anyway, per
+    explicit user direction, as a deliberate what-if/sensitivity exploration
+    of the cost-optimization surface -- NOT a claim that a 150-300 MN single
+    polyester line is buildable today. Any optimum this script reports with
+    MBL materially above ~30 MN describes a line with no manufacturing
+    precedent; flag that explicitly wherever such a result is used or
+    reported (e.g. in sweep_water_depth_cost.py output and the engineering
+    report).
+  - fairlead depth: 0.1x-1.0x water depth (1.0x = fairlead at MSL, the
+    stated maximum). r_a_m is derived from (theta, fairlead depth), not
+    swept independently.
+
+T0 (pretension) is not a free variable -- same derived rule as the other
+bc90 scripts (90% of the mooring-ULS ceiling, floored at the Section 9a
+load-margin value).
+
+No scipy in this repo's dependencies (requirements.txt), so this uses a
+two-stage search instead of a black-box optimizer:
+  1. Coarse grid over the 3 variables to find a good starting region --
+     avoids the pattern search below getting stuck in a local optimum, since
+     the cost surface is not smooth (governing constraint / feasibility can
+     switch discretely as MBL/geometry change, same as mbl_sensitivity.py's
+     ERROR/START-FAIL rows at high MBL).
+  2. Hooke-Jeeves pattern-search refinement from the best grid point:
+     explore +/- a step in each variable, move on any improvement, halve all
+     step sizes once a full sweep finds none, stop once steps are below
+     tolerance.
+
+Infeasible candidates (shrink loop's started_passing=False, i.e. the MP
+baseline itself fails a BC90 check at that mooring layout -- e.g. mooring
+ULS or slack violated -- or a numerical domain error at extreme geometries,
+same class seen in mbl_sensitivity.py) are treated as cost=+inf and
+naturally excluded by both search stages.
+"""
+import math
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from engine import DesignInputs, SoilProfile, size_monopile
+from bc90.engine_bc90 import evaluate_bc90, shrink_geometry_with_mooring, GAMMA_ML_ULS
+from bc90.mooring import layout_from_line_data
+
+
+soil = SoilProfile(soil_type="sand", friction_angle_deg=34.0, submerged_unit_weight_kn_m3=10.0)
+inputs = DesignInputs(turbine_mw=15.0, water_depth_m=90.0, soil=soil, hs_m=5.5, tp_s=9.5, current_m_s=0.4)
+
+THETA_BOUNDS_DEG = (20.0, 50.0)
+MBL_BOUNDS_MN = (5.0, 300.0)
+FAIRLEAD_FRACTION_BOUNDS = (0.1, 1.0)
+
+
+def build_mooring_layout(inputs: DesignInputs, theta_deg: float, mbl_mn: float, fairlead_fraction: float, baseline_geometry):
+    d_sb_fl_m = fairlead_fraction * inputs.water_depth_m
+    r_a_m = d_sb_fl_m / math.tan(math.radians(theta_deg))
+    ea_qs = 13.5 * mbl_mn
+    ea_dyn = 26.5 * mbl_mn
+
+    layout_pass1 = layout_from_line_data(
+        r_a_m=r_a_m, d_sb_fl_m=d_sb_fl_m, mbl_mn=mbl_mn,
+        ea_quasi_static_mn=ea_qs, ea_dynamic_mn=ea_dyn, pretension_fraction=0.15,
+    )
+    result_pass1 = evaluate_bc90(inputs, baseline_geometry, layout_pass1)
+    delta_t_max_mn = result_pass1.mooring_t_max_mn - layout_pass1.t0_mn
+
+    t0_uls_ceiling_mn = mbl_mn / GAMMA_ML_ULS - delta_t_max_mn
+    t0_load_margin_mn = 1.35 * delta_t_max_mn
+    t0_mn = max(t0_load_margin_mn, 0.90 * t0_uls_ceiling_mn)
+    pretension_fraction_final = t0_mn / mbl_mn
+
+    return layout_from_line_data(
+        r_a_m=r_a_m, d_sb_fl_m=d_sb_fl_m, mbl_mn=mbl_mn,
+        ea_quasi_static_mn=ea_qs, ea_dynamic_mn=ea_dyn, pretension_fraction=pretension_fraction_final,
+    )
+
+
+def evaluate_candidate(inputs: DesignInputs, theta_deg: float, mbl_mn: float, fairlead_fraction: float, baseline_geometry):
+    """Returns (cost_usd, detail) -- cost_usd is +inf and detail is None for
+    any infeasible or numerically-broken candidate."""
+    try:
+        mooring = build_mooring_layout(inputs, theta_deg, mbl_mn, fairlead_fraction, baseline_geometry)
+        g, r, started_passing = shrink_geometry_with_mooring(inputs, baseline_geometry, mooring)
+    except (ValueError, ZeroDivisionError):
+        return float("inf"), None
+    if not started_passing:
+        return float("inf"), None
+    return r.total_capex_usd, (g, r, mooring)
+
+
+def _clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+def coarse_grid_search(inputs: DesignInputs, baseline_geometry):
+    theta_values = [20, 25, 30, 35, 40, 45, 50]
+    mbl_values = [5, 8, 12, 18, 27, 40, 60, 90, 130, 150, 200, 250, 300]
+    frac_values = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0]
+
+    best = (float("inf"), None, None)
+    total = len(theta_values) * len(mbl_values) * len(frac_values)
+    done = 0
+    for theta_deg in theta_values:
+        for mbl_mn in mbl_values:
+            for frac in frac_values:
+                cost, detail = evaluate_candidate(inputs, theta_deg, mbl_mn, frac, baseline_geometry)
+                done += 1
+                if cost < best[0]:
+                    best = (cost, (theta_deg, mbl_mn, frac), detail)
+    return best, done
+
+
+def pattern_search_refine(inputs: DesignInputs, start_point, baseline_geometry, start_cost):
+    theta_deg, mbl_mn, frac = start_point
+    best_cost = start_cost
+    steps = [5.0, 15.0, 0.1]  # theta_deg, mbl_mn, fairlead_fraction
+    min_steps = [0.25, 0.5, 0.005]
+    bounds = [THETA_BOUNDS_DEG, MBL_BOUNDS_MN, FAIRLEAD_FRACTION_BOUNDS]
+
+    point = [theta_deg, mbl_mn, frac]
+    iterations = 0
+    while any(s > m for s, m in zip(steps, min_steps)) and iterations < 200:
+        iterations += 1
+        improved = False
+        for i in range(3):
+            for sign in (+1, -1):
+                trial = list(point)
+                trial[i] = _clamp(trial[i] + sign * steps[i], *bounds[i])
+                if trial == point:
+                    continue
+                cost, _ = evaluate_candidate(inputs, trial[0], trial[1], trial[2], baseline_geometry)
+                if cost < best_cost:
+                    best_cost = cost
+                    point = trial
+                    improved = True
+        if not improved:
+            steps = [s * 0.5 for s in steps]
+
+    return tuple(point), best_cost, iterations
+
+
+def optimize(inputs: DesignInputs, baseline_geometry=None, verbose: bool = False):
+    """Runs the full two-stage search (coarse grid + pattern-search
+    refinement) for the given DesignInputs. Returns
+    (theta_deg, mbl_mn, fairlead_fraction, geometry, BC90Result, MooringLayout).
+    baseline_geometry defaults to size_monopile(inputs).geometry (MP, no
+    mooring) if not supplied."""
+    if baseline_geometry is None:
+        baseline_geometry = size_monopile(inputs).geometry
+
+    (grid_cost, grid_point, grid_detail), n_grid = coarse_grid_search(inputs, baseline_geometry)
+    if verbose:
+        print(f"Coarse grid: {n_grid} candidates evaluated.")
+        theta0, mbl0, frac0 = grid_point
+        print(f"Best grid point: theta={theta0:.1f} deg  MBL={mbl0:.1f} MN  fairlead_frac={frac0:.2f}  cost=${grid_cost:,.0f}")
+
+    final_point, final_cost, n_sweeps = pattern_search_refine(inputs, grid_point, baseline_geometry, grid_cost)
+    if verbose:
+        print(f"Pattern search: {n_sweeps} sweeps.")
+    theta_opt, mbl_opt, frac_opt = final_point
+    _, final_detail = evaluate_candidate(inputs, theta_opt, mbl_opt, frac_opt, baseline_geometry)
+    g, r, mooring = final_detail
+    return theta_opt, mbl_opt, frac_opt, g, r, mooring
+
+
+def main():
+    print(f"Site: {inputs.turbine_mw:.0f} MW turbine, {inputs.water_depth_m:.0f} m water depth, "
+          f"sand (phi={inputs.soil.friction_angle_deg:.0f} deg), Hs={inputs.hs_m:.1f} m, Tp={inputs.tp_s:.1f} s")
+    print(f"Bounds: theta={THETA_BOUNDS_DEG} deg, MBL={MBL_BOUNDS_MN} MN, "
+          f"fairlead={FAIRLEAD_FRACTION_BOUNDS} x water depth\n")
+
+    mp_result = size_monopile(inputs)
+    baseline_geometry = mp_result.geometry
+    print(f"MP baseline (no mooring): D={baseline_geometry.diameter_m:.2f} m  "
+          f"t={baseline_geometry.wall_thickness_m*1000:.1f} mm  L={baseline_geometry.embedded_length_m:.2f} m  "
+          f"steel cost=${mp_result.steel_cost_usd:,.0f}\n")
+
+    theta_opt, mbl_opt, frac_opt, g, r, mooring = optimize(inputs, baseline_geometry, verbose=True)
+
+    print(f"\n=== Optimum ===")
+    print(f"theta={theta_opt:.2f} deg  MBL={mbl_opt:.2f} MN  fairlead={frac_opt:.3f} x depth "
+          f"({frac_opt*inputs.water_depth_m:.1f} m)  R_a={mooring.r_a_m:.2f} m  L_ml={r.l_ml_m:.2f} m")
+    print(f"D={g.diameter_m:.2f} m  t={g.wall_thickness_m*1000:.1f} mm  L={g.embedded_length_m:.2f} m  "
+          f"mass={r.steel_mass_t:.1f} t")
+    print(f"Cost: steel=${r.steel_cost_usd:,.0f}  mooring_line=${r.mooring_line_cost_usd:,.0f}  "
+          f"anchors=${r.anchor_cost_usd:,.0f}  TOTAL=${r.total_capex_usd:,.0f}")
+    print(f"Utilizations: ULS={r.uls_utilization:.3f} SLS={r.sls_utilization:.3f} NFA={r.nfa_utilization:.3f} "
+          f"FLS={r.fls_utilization:.3f} Buck={r.buckling_utilization:.3f} "
+          f"MooringULS={r.mooring_uls_utilization:.3f} Slack={r.slack_utilization:.3f}")
+    print(f"Governing: {r.governing_constraint}")
+    print(f"\nvs. MP steel-only baseline: ${mp_result.steel_cost_usd:,.0f}  "
+          f"({100*(1 - r.total_capex_usd/mp_result.steel_cost_usd):+.1f}%)")
+
+    if r.notes:
+        print(f"\nFlagged notes ({len(r.notes)}):")
+        for n in r.notes:
+            print(f"  - {n}")
+
+
+if __name__ == "__main__":
+    main()

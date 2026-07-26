@@ -26,7 +26,7 @@ Key simplifications (all concept-stage, not detailed/FEED-grade):
   _shell_buckling_check for why, and for what this replaced.
 Each simplification is called out at its function. Treat outputs as a
 starting point for detailed design / PISA-based or FE validation, not a
-substitute for it -- see docs/Monopile_Initial_Design_Method_Summary.md and
+substitute for it -- see docs/misc/Monopile_Initial_Design_Method_Summary.md and
 docs/METHODOLOGY_REPORT.md for the full equations/constants/assumptions, and
 docs/method_update_log.md for the dated history of how they were chosen.
 """
@@ -897,9 +897,7 @@ def size_monopile(inputs: DesignInputs, max_iterations: int = 500) -> MonopileRe
         # actually have. Shrink thickness step-wise while every check stays
         # <= 1.0, so the result reflects the true minimum-material thickness
         # rather than just "the first geometry checked that happened to
-        # pass." Diameter is deliberately not shrunk here -- it also feeds
-        # NFA and the extreme-load calculation, and NFA is still pending
-        # its own verification (see docs/method_update_log.md).
+        # pass," at the now diameter-minimized geometry above.
         while True:
             t_thinner_m = max(geometry.wall_thickness_m - t_step_m, t_floor_m)
             if t_thinner_m >= geometry.wall_thickness_m:
