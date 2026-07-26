@@ -12,6 +12,15 @@ At each water depth:
 
 Run directly:  python bc90/sweep_water_depth_cost.py
 Writes bc90/water_depth_sweep_results.csv.
+
+CAVEAT (2026-07-26): optimize_min_cost.optimize() now searches MBL up to
+300 MN. The largest polyester mooring rope ever built/installed is ~25.3 MN
+(Goliat FPSO record, see docs/misc/mooring_line_database.md "Physical
+-precedent caveat"); nothing near 150-300 MN has any manufacturing
+precedent. The 300 MN bound is kept as a deliberate what-if exploration per
+explicit user direction, not a claim of buildability -- any row below where
+mbl_mn is materially above ~30 MN describes a line with no real-world
+precedent and should be flagged as such when this CSV feeds the report.
 """
 import csv
 import os

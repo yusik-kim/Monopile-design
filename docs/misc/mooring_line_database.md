@@ -271,6 +271,12 @@ cost_per_m [EUR/m] = 0.0138 * MBL_kN + 11.281 = 13.8 * MBL_MN + 11.281
 | 100 | 1,391.3 | 1,502.6 |
 | 125 | 1,736.3 | 1,875.2 |
 | 150 | 2,081.3 | 2,247.8 |
+| 175 | 2,426.3 | 2,620.4 |
+| 200 | 2,771.3 | 2,993.0 |
+| 225 | 3,116.3 | 3,365.6 |
+| 250 | 3,461.3 | 3,738.2 |
+| 275 | 3,806.3 | 4,110.8 |
+| 300 | 4,151.3 | 4,483.4 |
 
 The USD column applies an indicative, unsourced FX conversion for
 order-of-magnitude comparison against the code's USD-denominated constant —
@@ -283,7 +289,7 @@ supplementary-mooring application specifically.
 paper concerns floating-wind shared-mooring systems, whose individual line
 MBLs are not stated in the excerpt read this session but are generally
 consistent with the 5-30 MN range already in the table — this document's own
-§1/scope note puts BC90's own target range at roughly 10-30 MN. The 40-150 MN
+§1/scope note puts BC90's own target range at roughly 10-30 MN. The 40-300 MN
 rows are a **linear extrapolation of Eq. (2) far outside any MBL range the
 source paper is known to have validated**, added here only because the tool
 is now being used to explore higher-MBL polyester lines; the formula's
@@ -291,7 +297,41 @@ intercept-plus-slope form has no physical reason to stay linear at this
 scale (e.g. it ignores manufacturing/handling step-changes for
 very-large-diameter rope), so treat the 40+ rows as an order-of-magnitude
 placeholder, weaker in confidence than the already-Primary 5-30 MN rows, not
-as sourced data in their own right.
+as sourced data in their own right. The 175-300 MN rows are extended further
+still (2026-07-26, at the request of exploring whether the optimizer's
+previous 150 MN search cap was a genuine physical limit or just an artifact
+of where this table previously stopped) — same linear formula, same caveat,
+now simply carried out twice as far past the paper's own validated range.
+
+**Physical-precedent caveat, added 2026-07-26 (single-line MBL, applies above
+~30 MN):** a web research pass this session found the **largest polyester
+mooring rope ever manufactured and installed is ≈2,578 t MBL (≈25.3 MN)** —
+Lankhorst's largest/strongest Gama 98 rope to date, built for the Goliat FPSO
+(Eni Norge, Barents Sea, 400 m water depth). The next-largest documented is
+Chevron's Tahiti truss spar rope at 1,907 t (≈18.7 MN, 254 mm diameter,
+reported at the time as "the largest polyester ropes ever made"). A more
+typical modern deepwater FPSO line (Energean Power, 1,750 m depth) is 12,400
+kN (12.4 MN). Generic commercial polyester rope listings top out around
+140 mm diameter; the >200 mm ropes above were record-setting, effectively
+bespoke builds (often bundled "sub-ropes" rather than one braided element).
+**In other words, ≈25-30 MN is the real-world ceiling for a single polyester
+mooring line — nothing near 150 MN, let alone 300 MN, has ever been built.**
+This document's own original scope note (§ intro, "MBL requirements roughly
+10–30 MN") already had this right. Sources: offshore-mag.com "Polyester
+ropes offer new opportunities for deepwater development" and "An examination
+of polyester fiber taut leg mooring systems for deepwater"; Lankhorst Ropes /
+maritime-executive.com OTC 2014 coverage; lankhorstoffshore.com news
+(Energean Power FPSO).
+
+**Despite the above, the 300 MN upper bound is being kept deliberately** —
+per explicit 2026-07-26 direction, the tool is being used to explore the
+cost-optimization surface well past any single line ever built, as a
+what-if/sensitivity exploration, not a claim that a 150-300 MN single
+polyester line is buildable today. Any result produced with MBL materially
+above ~30 MN (i.e. most of the extrapolated range in this table) describes a
+line with **no manufacturing precedent** and should be flagged as such
+wherever it is used or reported, including in `bc90/misc/optimize_min_cost.py`
+and the engineering report.
 
 Companion equations in the same source (not computed into a table here, since
 only the polyester relation was requested — available for a future pass):

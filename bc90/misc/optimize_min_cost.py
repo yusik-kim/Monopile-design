@@ -12,12 +12,32 @@ cost is total CAPEX (steel + mooring line + anchors, BC90Result.total_capex_usd)
 using the sourced MBL-dependent polyester line cost (docs/
 mooring_line_database.md Section 10a).
 
-Bounds (per 2026-07-24 request):
+Bounds (per 2026-07-24 request, MBL upper bound extended 2026-07-26):
   - theta (mooring line angle from horizontal): 20-50 deg
-  - MBL: 5-150 MN -- matches the cost table's now-tabulated range; higher
-    MBL has no sourced/extrapolated cost, so is out of scope for a COST
-    objective specifically (see mbl_sensitivity.py for the wider,
-    cost-blind MBL=1000 MN sweep).
+  - MBL: 5-300 MN -- matches the cost table's tabulated range (docs/
+    mooring_line_database.md Section 10a, extended from 150 to 300 MN on
+    2026-07-26 to check whether 150 was a genuine physical/cost limit or
+    just an artifact of where the table previously stopped -- see that
+    doc's extrapolation caveat: this is a linear extrapolation of a
+    floating-wind cost correlation, not sourced data, at this range).
+    Higher MBL still has no sourced/extrapolated cost, so is out of scope
+    for a COST objective specifically (see mbl_sensitivity.py for the
+    wider, cost-blind MBL=1000 MN sweep).
+
+    **NO MANUFACTURING PRECEDENT ABOVE ~30 MN (2026-07-26 research, see
+    mooring_line_database.md "Physical-precedent caveat"):** the largest
+    polyester mooring rope ever built and installed is ~2,578 t MBL
+    (~25.3 MN, Goliat FPSO, Lankhorst Gama 98) -- nothing near 150 MN, let
+    alone 300 MN, has ever been manufactured for a single line. This
+    document's own scope note (mooring_line_database.md intro) already put
+    BC90's real target at 10-30 MN. The 300 MN bound is kept anyway, per
+    explicit user direction, as a deliberate what-if/sensitivity exploration
+    of the cost-optimization surface -- NOT a claim that a 150-300 MN single
+    polyester line is buildable today. Any optimum this script reports with
+    MBL materially above ~30 MN describes a line with no manufacturing
+    precedent; flag that explicitly wherever such a result is used or
+    reported (e.g. in sweep_water_depth_cost.py output and the engineering
+    report).
   - fairlead depth: 0.1x-1.0x water depth (1.0x = fairlead at MSL, the
     stated maximum). r_a_m is derived from (theta, fairlead depth), not
     swept independently.
@@ -59,7 +79,7 @@ soil = SoilProfile(soil_type="sand", friction_angle_deg=34.0, submerged_unit_wei
 inputs = DesignInputs(turbine_mw=15.0, water_depth_m=90.0, soil=soil, hs_m=5.5, tp_s=9.5, current_m_s=0.4)
 
 THETA_BOUNDS_DEG = (20.0, 50.0)
-MBL_BOUNDS_MN = (5.0, 150.0)
+MBL_BOUNDS_MN = (5.0, 300.0)
 FAIRLEAD_FRACTION_BOUNDS = (0.1, 1.0)
 
 
@@ -106,7 +126,7 @@ def _clamp(x, lo, hi):
 
 def coarse_grid_search(inputs: DesignInputs, baseline_geometry):
     theta_values = [20, 25, 30, 35, 40, 45, 50]
-    mbl_values = [5, 8, 12, 18, 27, 40, 60, 90, 130, 150]
+    mbl_values = [5, 8, 12, 18, 27, 40, 60, 90, 130, 150, 200, 250, 300]
     frac_values = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0]
 
     best = (float("inf"), None, None)
