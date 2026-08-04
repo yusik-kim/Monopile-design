@@ -150,6 +150,64 @@ def check_22mw_sand_converges():
     print("  PASS\n")
 
 
+def check_fls_spectral_smoke():
+    """
+    Smoke test for the frequency-domain FLS path (load/fls_spectral.py),
+    opted into via fls_method="spectral" -- not a benchmark against the real
+    reference designs (that validation, comparing against
+    docs/METHODOLOGY_REPORT.md Section 10, is deliberately a later step, see
+    docs/method_update_log.md). Just: it runs, returns a finite positive
+    damage, doesn't disturb the default "simple" path, and DLC72/unknown-DLC/
+    unknown-fls_method all fail loudly rather than silently as documented.
+    """
+    print("Case: frequency-domain FLS smoke test (fls_method='spectral')")
+    soil = SoilProfile(soil_type="sand", friction_angle_deg=35.0, submerged_unit_weight_kn_m3=9.5)
+    geometry = MonopileGeometry(diameter_m=10.0, wall_thickness_m=0.1069, embedded_length_m=50.0)
+
+    inputs_spectral = DesignInputs(
+        turbine_mw=15.0, water_depth_m=35.0, soil=soil, hs_m=5.0, tp_s=10.0, fls_method="spectral",
+    )
+    result = evaluate_monopile(inputs_spectral, geometry)
+    print(f"  fls_damage={result.fls_damage:.4f}  fls_utilization={result.fls_utilization:.4f}")
+    assert result.fls_damage > 0.0 and result.fls_damage < float("inf"), "spectral FLS damage not finite/positive"
+
+    # Default path at the same geometry is untouched by fls_method="spectral" existing.
+    inputs_simple = DesignInputs(turbine_mw=15.0, water_depth_m=35.0, soil=soil, hs_m=5.0, tp_s=10.0)
+    result_simple = evaluate_monopile(inputs_simple, geometry)
+    assert result_simple.fls_damage != result.fls_damage, "expected the two methods to disagree (not yet benchmarked)"
+
+    # DLC72 is an accepted label but explicitly not implemented -- must fail loudly.
+    inputs_dlc72 = DesignInputs(
+        turbine_mw=15.0, water_depth_m=35.0, soil=soil, hs_m=5.0, tp_s=10.0,
+        fls_method="spectral", dlcs_to_run=["DLC12", "DLC72"],
+    )
+    try:
+        evaluate_monopile(inputs_dlc72, geometry)
+        raise AssertionError("expected NotImplementedError for DLC72")
+    except NotImplementedError:
+        pass
+
+    inputs_bad_dlc = DesignInputs(
+        turbine_mw=15.0, water_depth_m=35.0, soil=soil, hs_m=5.0, tp_s=10.0,
+        fls_method="spectral", dlcs_to_run=["DLC99"], dlc_probability={"DLC99": 1.0},
+    )
+    try:
+        evaluate_monopile(inputs_bad_dlc, geometry)
+        raise AssertionError("expected ValueError for an unknown DLC")
+    except ValueError:
+        pass
+
+    inputs_bad_method = DesignInputs(
+        turbine_mw=15.0, water_depth_m=35.0, soil=soil, hs_m=5.0, tp_s=10.0, fls_method="bogus",
+    )
+    try:
+        evaluate_monopile(inputs_bad_method, geometry)
+        raise AssertionError("expected ValueError for an unknown fls_method")
+    except ValueError:
+        pass
+    print("  PASS\n")
+
+
 def check_turbine_library_matches_sources():
     print("Case: TURBINE_LIBRARY exact values match sourced reference turbines (see docs/METHODOLOGY_REPORT.md Section 2)")
     oc3_5mw = turbine_from_capacity(5.0)
@@ -176,4 +234,5 @@ if __name__ == "__main__":
     check_5mw_sand_converges()
     check_15mw_sand_converges()
     check_22mw_sand_converges()
+    check_fls_spectral_smoke()
     print("All checks passed.")

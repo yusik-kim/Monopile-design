@@ -152,6 +152,26 @@ class DesignInputs:
     avg_tower_diameter_m: float | None = None
     avg_tower_wall_thickness_m: float | None = None
 
+    # --- Frequency-domain FLS (load/fls_spectral.py) -- inert unless fls_method="spectral" ---
+    fls_method: str = "simple"            # "simple" (default, engine._fls_check) or "spectral"
+    site_severity: str = "Medium"         # Mild/Medium/Harsh/Very harsh preset, or a site_severity
+                                           # not in load.environment.SITE_SEVERITY_PRESETS + explicit
+                                           # hs_ref_m/tp_ref_s below for a custom anchor
+    hs_ref_m: float | None = None         # custom-mode site-severity anchor (ignored for a preset)
+    tp_ref_s: float | None = None
+    u_ref_m_s: float = 12.0               # reference wind speed for the Hs(U)/Tp(U) scaling law
+    weibull_k: float = 2.0                # site wind-speed distribution (shape, scale)
+    weibull_a_m_s: float = 10.0
+    wind_bin_start_m_s: float = 4.0       # DLC12 wind-speed bin centers
+    wind_bin_step_m_s: float = 2.0
+    wind_bin_stop_m_s: float = 24.0
+    dlcs_to_run: list[str] = field(default_factory=lambda: ["DLC12"])
+    dlc_probability: dict[str, float] = field(default_factory=lambda: {"DLC12": 0.9, "DLC72": 0.1})
+    turbulence_intensity: float = 0.14    # sigma_u = turbulence_intensity * U, per wind bin
+    damping_struct: float = 0.005         # structural (steel) damping ratio, constant across all DLCs
+    damping_soil: float = 0.005           # soil/foundation hysteretic damping ratio, constant across all DLCs
+    damping_aero_dlc12: float = 0.03      # aerodynamic damping ratio, DLC12 only (0 for DLC72 -- see load/damping.py)
+
 
 @dataclass
 class MonopileGeometry:
@@ -633,7 +653,17 @@ def evaluate_monopile(inputs: DesignInputs, geometry: MonopileGeometry) -> Monop
     uls_utilization = _uls_check(geometry, m_mudline_mnm, v_mudline_mn)
     sls_rotation_deg, sls_utilization = _sls_check(inputs, m_mudline_mnm, v_mudline_mn, k_line_mn_m2, beta)
     f0_hz, band, nfa_utilization, nfa_notes = _natural_frequency(inputs, geometry, turbine, k_lateral, k_rocking)
-    fls_damage, fls_utilization = _fls_check(inputs, geometry, turbine, m_mudline_mnm)
+
+    if inputs.fls_method == "spectral":
+        # Deferred import: load/fls_spectral.py imports from this module, so a
+        # top-level import here would be circular. See load/__init__.py.
+        from load.fls_spectral import evaluate_fls_spectral
+        fls_damage, fls_utilization, fls_notes = evaluate_fls_spectral(inputs, geometry, turbine, f0_hz)
+    elif inputs.fls_method == "simple":
+        fls_damage, fls_utilization = _fls_check(inputs, geometry, turbine, m_mudline_mnm)
+        fls_notes = []
+    else:
+        raise ValueError(f"Unknown fls_method: {inputs.fls_method!r} (expected 'simple' or 'spectral')")
 
     l_panel_m = inputs.water_depth_m + turbine["transition_piece_height_m"]
     axial_load_mn = _axial_load_estimate(inputs, geometry, turbine)
@@ -650,7 +680,7 @@ def evaluate_monopile(inputs: DesignInputs, geometry: MonopileGeometry) -> Monop
     area_m2 = (math.pi / 4) * (d ** 2 - d_inner ** 2)
     steel_mass_t = area_m2 * geometry.embedded_length_m * STEEL_DENSITY_T_PER_M3
 
-    notes = list(soil_notes) + list(nfa_notes)
+    notes = list(soil_notes) + list(nfa_notes) + list(fls_notes)
     if d > 7.5 or (geometry.embedded_length_m / d) < 4.0:
         notes.append(
             "Diameter > ~7.5 m or L/D < 4: classical p-y / Hetenyi closed-form "
